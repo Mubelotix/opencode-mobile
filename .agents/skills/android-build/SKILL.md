@@ -1,3 +1,8 @@
+---
+name: android-build
+description: Build and deploy KMP app to Android devices via ADB with WiFi debugging
+---
+
 # Android Build & Deploy Skill
 
 Self-improving skill for building and deploying this KMP app to Android devices via ADB. Update with new/corrected information as discovered.
