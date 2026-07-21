@@ -45,18 +45,24 @@ import page.dera.opencode.api.SessionInfo
 fun ProjectScreen(api: OpencodeApi, project: ProjectInfo, onBack: () -> Unit, onSessionClick: (SessionInfo) -> Unit) {
     var sessions by remember { mutableStateOf<List<SessionInfo>>(emptyList()) }
     var nextCursor by remember { mutableStateOf<String?>(null) }
+    var hasMore by remember { mutableStateOf(false) }
     var errorMessage by remember { mutableStateOf<String?>(null) }
     var isLoading by remember { mutableStateOf(true) }
     var isLoadingMore by remember { mutableStateOf(false) }
     val scope = rememberCoroutineScope()
+    val limit = 30
+
+    fun handlePage(response: page.dera.opencode.api.SessionsResponse, append: Boolean) {
+        val filtered = response.data.filter { it.parentID == null }
+        sessions = if (append) sessions + filtered else filtered
+        nextCursor = response.cursor?.next
+        hasMore = response.data.size >= limit
+    }
 
     LaunchedEffect(Unit) {
         val result = api.listSessions(projectID = project.id)
         result.fold(
-            onSuccess = {
-                sessions = it.data.filter { it.parentID == null }
-                nextCursor = it.cursor?.next
-            },
+            onSuccess = { handlePage(it, append = false) },
             onFailure = { errorMessage = it.message ?: "Failed to load sessions" },
         )
         isLoading = false
@@ -88,10 +94,7 @@ fun ProjectScreen(api: OpencodeApi, project: ProjectInfo, onBack: () -> Unit, on
                             scope.launch {
                                 val result = api.listSessions(projectID = project.id)
                                 result.fold(
-                                    onSuccess = {
-                                        sessions = it.data.filter { it.parentID == null }
-                                        nextCursor = it.cursor?.next
-                                    },
+                                    onSuccess = { handlePage(it, append = false) },
                                     onFailure = { errorMessage = it.message ?: "Failed to load sessions" },
                                 )
                                 isLoading = false
@@ -145,7 +148,7 @@ fun ProjectScreen(api: OpencodeApi, project: ProjectInfo, onBack: () -> Unit, on
                             Spacer(modifier = Modifier.height(12.dp))
                         }
                     }
-                    if (nextCursor != null) {
+                    if (hasMore) {
                         item(key = "load_more") {
                             Box(
                                 modifier = Modifier
@@ -164,10 +167,7 @@ fun ProjectScreen(api: OpencodeApi, project: ProjectInfo, onBack: () -> Unit, on
                                                 cursor = nextCursor,
                                             )
                                             result.fold(
-                                                onSuccess = {
-                                                    sessions = sessions + it.data.filter { s -> s.parentID == null }
-                                                    nextCursor = it.cursor?.next
-                                                },
+                                                onSuccess = { handlePage(it, append = true) },
                                                 onFailure = { errorMessage = it.message ?: "Failed to load more" },
                                             )
                                             isLoadingMore = false
