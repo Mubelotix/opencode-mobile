@@ -26,3 +26,8 @@ When unsure about opencode server behavior, read the cloned source in `/tmp/open
 - `shared/` — Kotlin Multiplatform shared logic (commonMain, androidMain, iosMain)
 - `androidApp/` — Android application
 - `iosApp/` — iOS application (Swift, Xcode project)
+
+## Platform compatibility
+- iOS support must be maintained — do not break `iosMain` sources or the `iosApp/` Xcode project
+- iOS UI work is deferred to later in the project lifecycle, but the shared KMP code must remain compilable for iOS
+- When adding `expect`/`actual` declarations, always include the `iosMain` actual counterpart
