@@ -7,7 +7,7 @@
 	objects = {
 
 /* Begin PBXFileReference section */
-		782DA9F8075C7D7A73D7A566 /* OpencodeApp.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = OpencodeApp.app; sourceTree = BUILT_PRODUCTS_DIR; };
+		782DA9F8075C7D7A73D7A566 /* OpenCode.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = OpenCode.app; sourceTree = BUILT_PRODUCTS_DIR; };
 /* End PBXFileReference section */
 
 /* Begin PBXFileSystemSynchronizedBuildFileExceptionSet section */
@@ -59,7 +59,7 @@
 		A6AF4084AC99074B0B658FB6 /* Products */ = {
 			isa = PBXGroup;
 			children = (
-				782DA9F8075C7D7A73D7A566 /* OpencodeApp.app */,
+				782DA9F8075C7D7A73D7A566 /* OpenCode.app */,
 			);
 			name = Products;
 			sourceTree = "<group>";
@@ -87,7 +87,7 @@
 			packageProductDependencies = (
 			);
 			productName = iosApp;
-			productReference = 782DA9F8075C7D7A73D7A566 /* OpencodeApp.app */;
+			productReference = 782DA9F8075C7D7A73D7A566 /* OpenCode.app */;
 			productType = "com.apple.product-type.application";
 		};
 /* End PBXNativeTarget section */

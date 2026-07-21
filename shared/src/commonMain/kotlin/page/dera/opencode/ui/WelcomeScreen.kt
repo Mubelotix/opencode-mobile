@@ -29,12 +29,12 @@ import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.ui.unit.dp
 import kotlinx.coroutines.launch
+import io.ktor.client.HttpClient
 import page.dera.opencode.api.OpencodeApi
 import page.dera.opencode.api.ValidationResult
 
 @Composable
 fun WelcomeScreen(
-    api: OpencodeApi,
     initialUrl: String = "",
     initialPassword: String = "",
     onConfigured: (serverUrl: String, password: String) -> Unit,
@@ -109,7 +109,9 @@ fun WelcomeScreen(
                     isLoading = true
                     errorMessage = null
                     scope.launch {
-                        val result = api.validate(url, password)
+                        val normalizedUrl = OpencodeApi.normalizeUrl(url)
+                        val tempApi = OpencodeApi(HttpClient(), normalizedUrl, password)
+                        val result = tempApi.validate()
                         isLoading = false
                         when (result) {
                             is ValidationResult.Success -> onConfigured(url, password)
