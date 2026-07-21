@@ -16,6 +16,7 @@ Clone for context when implementing opencode client behavior:
 ```bash
 git clone https://github.com/anomalyco/opencode /tmp/opencode
 ```
+When unsure about opencode server behavior, read the cloned source in `/tmp/opencode` instead of guessing.
 
 ## Dependencies
 - Prefer latest stable versions when adding or updating dependencies
