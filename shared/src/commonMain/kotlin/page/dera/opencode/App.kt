@@ -9,6 +9,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.tooling.preview.Preview
 import io.ktor.client.HttpClient
+import io.ktor.client.plugins.HttpTimeout
 import page.dera.opencode.api.OpencodeApi
 import page.dera.opencode.api.SessionInfo
 import page.dera.opencode.api.ValidationResult
@@ -35,7 +36,7 @@ fun App() {
     val settings = remember { AppSettings() }
     val serverUrl = remember { OpencodeApi.normalizeUrl(settings.serverUrl ?: "") }
     val password = remember { settings.serverPassword }
-    val api = remember { OpencodeApi(HttpClient(), serverUrl, password) }
+    val api = remember { OpencodeApi(HttpClient { install(HttpTimeout) { requestTimeoutMillis = 300_000 } }, serverUrl, password) }
 
     var screen: Screen by remember {
         mutableStateOf(
@@ -67,7 +68,7 @@ fun App() {
                     onConfigured = { url, pwd ->
                         settings.serverUrl = url
                         settings.serverPassword = pwd
-                        val newApi = OpencodeApi(HttpClient(), OpencodeApi.normalizeUrl(url), pwd)
+                        val newApi = OpencodeApi(HttpClient { install(HttpTimeout) { requestTimeoutMillis = 300_000 } }, OpencodeApi.normalizeUrl(url), pwd)
                         screen = Screen.Starred(newApi)
                     },
                 )
@@ -112,6 +113,7 @@ fun App() {
                     api = current.api,
                     sessionId = current.session.id,
                     sessionTitle = current.session.title,
+                    directory = current.directory,
                     onBack = { screen = Screen.ProjectDetail(current.api, current.directory, current.projectName) },
                 )
             }

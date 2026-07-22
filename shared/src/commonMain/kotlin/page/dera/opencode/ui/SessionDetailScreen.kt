@@ -1,7 +1,5 @@
 package page.dera.opencode.ui
 
-import androidx.compose.animation.AnimatedVisibility
-import androidx.compose.animation.fadeIn
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
@@ -17,7 +15,7 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -26,18 +24,17 @@ import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material3.Button
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
-import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBar
-import androidx.compose.material3.contentColorFor
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateListOf
+import androidx.compose.runtime.mutableStateMapOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
@@ -49,683 +46,158 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.unit.dp
-import kotlinx.coroutines.CancellationException
-import kotlinx.coroutines.coroutineScope
-import kotlinx.coroutines.delay
-import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
-import page.dera.opencode.api.AssistantContent
+import page.dera.opencode.api.LegacyInfo
+import page.dera.opencode.api.LegacyPart
+import page.dera.opencode.api.LegacyToolState
+import page.dera.opencode.api.LegacyWithParts
 import page.dera.opencode.api.OpencodeApi
-import page.dera.opencode.api.SessionMessage
-import page.dera.opencode.api.ToolState
+import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.jsonObject
+import kotlinx.serialization.json.jsonPrimitive
 import opencodeapp.shared.generated.resources.Res
-import opencodeapp.shared.generated.resources.triangle_alert
 import opencodeapp.shared.generated.resources.clock
+import opencodeapp.shared.generated.resources.file
+import opencodeapp.shared.generated.resources.terminal
+import opencodeapp.shared.generated.resources.triangle_alert
 import org.jetbrains.compose.resources.painterResource
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun SessionDetailScreen(
-    api: OpencodeApi,
-    sessionId: String,
-    sessionTitle: String,
-    onBack: () -> Unit,
-) {
-    val messages = remember { mutableStateListOf<SessionMessage>() }
+fun SessionDetailScreen(api: OpencodeApi, sessionId: String, sessionTitle: String, directory: String, onBack: () -> Unit) {
+    val messages = remember { mutableStateListOf<LegacyWithParts>() }
     val listState = rememberLazyListState()
     var inputText by remember { mutableStateOf("") }
-    var isStreaming by remember { mutableStateOf(false) }
-    var isSending by remember { mutableStateOf(false) }
-    var errorText by remember { mutableStateOf<String?>(null) }
-    val scope = rememberCoroutineScope()
-
     var isLoading by remember { mutableStateOf(true) }
+    var isSending by remember { mutableStateOf(false) }
+    var isRunning by remember { mutableStateOf(false) }
+    var errorText by remember { mutableStateOf<String?>(null) }
+    val streamingText = remember { mutableStateMapOf<String, String>() }
+    var streamVersion by remember { mutableStateOf(0) }
+    val scope = rememberCoroutineScope()
 
     LaunchedEffect(sessionId) {
         isLoading = true
-        val result = api.getSessionMessages(sessionId)
-        result.onSuccess { msgs ->
-            messages.clear()
-            messages.addAll(msgs)
-        }.onFailure {
-            errorText = it.message ?: "Failed to load messages"
-        }
+        api.getSessionMessages(sessionId).onSuccess { messages.clear(); messages.addAll(it) }.onFailure { errorText = it.message }
         isLoading = false
     }
 
-    LaunchedEffect(messages.size) {
-        if (messages.isNotEmpty()) {
-            listState.animateScrollToItem(messages.lastIndex)
-        }
+    LaunchedEffect(messages.size) { if (messages.isNotEmpty()) listState.animateScrollToItem(messages.lastIndex) }
+
+    LaunchedEffect(sessionId, directory) {
+        try {
+            api.streamGlobalEvents(directory).collect { event ->
+                val props = event.payload?.properties?.jsonObject ?: return@collect
+                val sid = props["sessionID"]?.jsonPrimitive?.content ?: return@collect
+                if (sid != sessionId) return@collect
+                when (event.payload?.type) {
+                    "message.part.delta" -> {
+                        val k = "${props["messageID"]?.jsonPrimitive?.content}:${props["partID"]?.jsonPrimitive?.content}"
+                        streamingText[k] = (streamingText[k] ?: "") + (props["delta"]?.jsonPrimitive?.content ?: "")
+                        streamVersion++
+                    }
+                    "message.part.updated" -> {
+                        val p = props["part"]?.jsonObject ?: return@collect
+                        val k = "${p["messageID"]?.jsonPrimitive?.content}:${p["id"]?.jsonPrimitive?.content}"
+                        streamingText.remove(k)
+                        val part = try { kotlinx.serialization.json.Json { ignoreUnknownKeys = true; coerceInputValues = true }.decodeFromJsonElement(LegacyPart.serializer(), p) } catch (_: Exception) { return@collect }
+                        val mi = messages.indexOfFirst { it.info.id == p["messageID"]?.jsonPrimitive?.content }
+                        if (mi >= 0) { val mp = messages[mi].parts.toMutableList(); val pi = mp.indexOfFirst { it.id == part.id }; if (pi >= 0) mp[pi] = part else mp.add(part); messages[mi] = LegacyWithParts(messages[mi].info, mp) }
+                    }
+                    "message.updated" -> {
+                        val infoJson = props["info"]?.jsonObject ?: return@collect
+                        val info = try { kotlinx.serialization.json.Json { ignoreUnknownKeys = true; coerceInputValues = true }.decodeFromJsonElement(LegacyInfo.serializer(), infoJson) } catch (_: Exception) { return@collect }
+                        val mi = messages.indexOfFirst { it.info.id == info.id }
+                        if (mi >= 0) messages[mi] = LegacyWithParts(info, messages[mi].parts) else messages.add(LegacyWithParts(info))
+                    }
+                    "session.status" -> { isRunning = true }
+                    "session.idle" -> {
+                        isRunning = false
+                        api.getSessionMessages(sessionId).onSuccess { messages.clear(); messages.addAll(it) }
+                    }
+                }
+            }
+        } catch (_: Exception) { }
     }
 
     Scaffold(
-        topBar = {
-            TopAppBar(
-                title = {
-                    Text(
-                        text = sessionTitle.ifEmpty { "Session" },
-                        style = MaterialTheme.typography.titleMedium,
-                        maxLines = 1,
-                    )
-                },
-                navigationIcon = {
-                    IconButton(onClick = onBack) {
-                        Text("<", style = MaterialTheme.typography.titleMedium)
-                    }
-                },
-            )
-        },
+        topBar = { TopAppBar(title = { Text(sessionTitle.ifEmpty { "Session" }, style = MaterialTheme.typography.titleMedium, maxLines = 1) }, navigationIcon = { IconButton(onClick = onBack) { Text("<", style = MaterialTheme.typography.titleMedium) } }) },
         bottomBar = {
-            InputBar(
-                inputText = inputText,
-                onInputChange = { inputText = it },
-                onSend = {
-                    if (inputText.isNotBlank()) {
-                        val text = inputText.trim()
-                        inputText = ""
-                        isSending = true
-                        errorText = null
-                        scope.launch {
-                            val result = api.sendPrompt(sessionId, text)
-                            if (result.isSuccess) {
-                                isStreaming = true
-                                while (isStreaming) {
-                                    kotlinx.coroutines.coroutineScope {
-                                        launch {
-                                            try {
-                                                api.streamSessionEvents(sessionId).collect { event ->
-                                                    val fresh = api.getSessionMessages(sessionId)
-                                                    fresh.onSuccess { msgList ->
-                                                        messages.clear()
-                                                        messages.addAll(msgList)
-                                                    }
-                                                    if (event.type == "session.next.step.ended" ||
-                                                        event.type == "session.next.step.failed") {
-                                                        throw CancellationException("step done")
-                                                    }
-                                                }
-                                            } catch (_: CancellationException) {
-                                            } catch (e: Exception) {
-                                                println("OC_DBG: SSE error: ${e.message}")
-                                            }
-                                        }
-                                    }
-                                    delay(500)
-                                    val last = api.getSessionMessages(sessionId)
-                                    last.onSuccess { msgList ->
-                                        messages.clear()
-                                        messages.addAll(msgList)
-                                        val done = msgList.none {
-                                            it is SessionMessage.Assistant && it.finish == null && it.error == null
-                                        }
-                                        if (done) {
-                                            isStreaming = false
-                                            return@launch
-                                        }
-                                    }
-                                }
-                            } else {
-                                errorText = result.exceptionOrNull()?.message ?: "Failed to send"
-                                println("OC_DBG: send fail: $errorText")
-                            }
-                            isSending = false
-                        }
+            Row(Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 8.dp), verticalAlignment = Alignment.Bottom) {
+                val doSend = {
+                    if (inputText.isNotBlank()) { val t = inputText.trim(); inputText = ""; isSending = true; errorText = null
+                        scope.launch { println("OC_DBG: send"); if (api.sendPrompt(sessionId, t).isSuccess) { println("OC_DBG: send ok") } else { println("OC_DBG: send fail"); errorText = "Failed to send" }; isSending = false }
                     }
-                },
-                isSending = isSending,
-                isStreaming = isStreaming,
-                enabled = !isStreaming,
-            )
+                }
+                OutlinedTextField(
+                    value = inputText, onValueChange = { inputText = it }, modifier = Modifier.weight(1f),
+                    placeholder = { Text("Type a message...") }, maxLines = 4,
+                    keyboardOptions = KeyboardOptions(imeAction = ImeAction.Send),
+                    keyboardActions = KeyboardActions(onSend = { doSend() }), enabled = !isSending
+                )
+                Spacer(Modifier.width(8.dp))
+                Button(onClick = { doSend() }, enabled = inputText.isNotBlank() && !isSending, modifier = Modifier.height(56.dp)) { Text(if (isSending) "..." else "Send") }
+            }
         },
     ) { padding ->
-        Column(
-            modifier = Modifier
-                .fillMaxSize()
-                .padding(padding),
-        ) {
-            if (errorText != null) {
-                Box(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .background(MaterialTheme.colorScheme.errorContainer)
-                        .padding(12.dp),
-                ) {
-                    Text(
-                        text = errorText!!,
-                        color = MaterialTheme.colorScheme.onErrorContainer,
-                        style = MaterialTheme.typography.bodyMedium,
-                    )
-                }
-            }
-
-            if (messages.isEmpty() && !isStreaming) {
-                Box(
-                    modifier = Modifier.fillMaxSize(),
-                    contentAlignment = Alignment.Center,
-                ) {
-                    Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                        if (isLoading) {
-                            CircularProgressIndicator(modifier = Modifier.size(24.dp))
-                            Spacer(modifier = Modifier.height(8.dp))
-                            Text(
-                                text = "Loading...",
-                                style = MaterialTheme.typography.bodyMedium,
-                                color = MaterialTheme.colorScheme.outline,
-                            )
-                        } else {
-                            Text(
-                                text = sessionTitle.ifEmpty { "Session" },
-                                style = MaterialTheme.typography.headlineSmall,
-                            )
-                            if (errorText == null) {
-                                Text(
-                                    text = "No messages yet",
-                                    style = MaterialTheme.typography.bodySmall,
-                                    color = MaterialTheme.colorScheme.outline,
-                                )
-                            }
-                        }
-                    }
-                }
-            } else {
-                LazyColumn(
-                    state = listState,
-                    modifier = Modifier.fillMaxSize(),
-                    verticalArrangement = Arrangement.spacedBy(8.dp),
-                    contentPadding = androidx.compose.foundation.layout.PaddingValues(
-                        horizontal = 12.dp,
-                        vertical = 8.dp,
-                    ),
-                ) {
-                    items(messages) { message ->
-                        MessageBubble(message)
-                    }
-
-                    if (isStreaming) {
-                        item {
-                            StreamingIndicator()
-                        }
-                    }
+        Column(Modifier.fillMaxSize().padding(padding)) {
+            if (errorText != null) Box(Modifier.fillMaxWidth().background(MaterialTheme.colorScheme.errorContainer).padding(12.dp)) { Text(errorText!!, color = MaterialTheme.colorScheme.onErrorContainer, style = MaterialTheme.typography.bodyMedium) }
+            if (messages.isEmpty() && !isLoading) Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) { Text(sessionTitle.ifEmpty { "Session" }, style = MaterialTheme.typography.headlineSmall) }
+            else {
+                LazyColumn(state = listState, modifier = Modifier.fillMaxSize(), verticalArrangement = Arrangement.spacedBy(6.dp), contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = 12.dp, vertical = 8.dp)) {
+                    itemsIndexed(messages) { _, msg -> MessageCard(msg, streamingText, streamVersion) }
+                    if (isSending || isRunning) item { SendingIndicator() }
                 }
             }
         }
     }
 }
 
-@Composable
-private fun InputBar(
-    inputText: String,
-    onInputChange: (String) -> Unit,
-    onSend: () -> Unit,
-    isSending: Boolean,
-    isStreaming: Boolean,
-    enabled: Boolean,
-) {
-    Row(
-        modifier = Modifier
-            .fillMaxWidth()
-            .padding(horizontal = 12.dp, vertical = 8.dp),
-        verticalAlignment = Alignment.Bottom,
-    ) {
-        OutlinedTextField(
-            value = inputText,
-            onValueChange = onInputChange,
-            modifier = Modifier.weight(1f),
-            placeholder = { Text("Type a message...") },
-            maxLines = 4,
-            keyboardOptions = KeyboardOptions(imeAction = ImeAction.Send),
-            keyboardActions = KeyboardActions(onSend = { onSend() }),
-            enabled = enabled,
-        )
-        Spacer(modifier = Modifier.width(8.dp))
-        Button(
-            onClick = onSend,
-            enabled = inputText.isNotBlank() && !isSending && enabled,
-            modifier = Modifier.height(56.dp),
-        ) {
-            if (isSending || isStreaming) {
-                Text("Wait")
-            } else {
-                Text("Send")
-            }
-        }
+@Composable private fun SendingIndicator() = Box(Modifier.fillMaxWidth(), contentAlignment = Alignment.Center) { Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.padding(8.dp)) { CircularProgressIndicator(Modifier.size(16.dp), strokeWidth = 2.dp); Spacer(Modifier.width(8.dp)); Text("OpenCode responding...", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.outline) } }
+
+@Composable private fun MessageCard(msg: LegacyWithParts, streamingText: Map<String, String>, streamVersion: Int) {
+    streamVersion
+    val parts = msg.parts.filter { it.type !in listOf("step-start","step-finish","snapshot","patch") }
+    when (msg.info.role) {
+        "user" -> Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) { Column(Modifier.widthIn(max = 320.dp).clip(RoundedCornerShape(16.dp, 4.dp, 16.dp, 16.dp)).background(MaterialTheme.colorScheme.primaryContainer).padding(12.dp)) { Text(parts.filter { it.type=="text" }.joinToString("\n"){it.text ?: ""}.ifEmpty{"Sent a message"}, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onPrimaryContainer) } }
+        "assistant" -> AssistantCard(msg.info, parts, streamingText)
+        else -> Box(Modifier.fillMaxWidth(), contentAlignment = Alignment.Center) { Text("System message", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.outline, modifier = Modifier.padding(vertical = 4.dp)) }
     }
 }
 
-@Composable
-private fun MessageBubble(message: SessionMessage) {
-    when (message) {
-        is SessionMessage.User -> UserBubble(message)
-        is SessionMessage.Assistant -> AssistantBubble(message)
-        is SessionMessage.SystemMsg -> SystemBubble(message)
-        is SessionMessage.Shell -> ShellBubble(message)
-        is SessionMessage.Synthetic -> SyntheticBubble(message)
-        is SessionMessage.AgentSwitched -> AgentSwitchedBubble(message)
-        is SessionMessage.ModelSwitched -> ModelSwitchedBubble(message)
-        is SessionMessage.Compaction -> CompactionBubble(message)
-        is SessionMessage.Unknown -> UnknownBubble(message)
+@Composable private fun AssistantCard(info: LegacyInfo, parts: List<LegacyPart>, streamingText: Map<String, String>) {
+    Column(Modifier.fillMaxWidth().padding(start = 8.dp)) {
+        if (info.error != null) Box(Modifier.fillMaxWidth().clip(RoundedCornerShape(12.dp)).background(MaterialTheme.colorScheme.errorContainer).padding(14.dp)) { Row(verticalAlignment = Alignment.Top) { Image(painterResource(Res.drawable.triangle_alert), null, Modifier.size(22.dp)); Spacer(Modifier.width(10.dp)); Column { Text("Error", style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.onErrorContainer); Spacer(Modifier.height(4.dp)); Text(info.error!!.name, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onErrorContainer) } } }
+        parts.forEach { PartContent(it, streamingText) }
     }
 }
 
-@Composable
-private fun UserBubble(message: SessionMessage.User) {
-    Row(
-        modifier = Modifier.fillMaxWidth(),
-        horizontalArrangement = Arrangement.End,
-    ) {
-        Column(
-            modifier = Modifier
-                .widthIn(max = 320.dp)
-                .clip(RoundedCornerShape(16.dp, 4.dp, 16.dp, 16.dp))
-                .background(MaterialTheme.colorScheme.primaryContainer)
-                .padding(12.dp),
-        ) {
-            Text(
-                text = message.text,
-                style = MaterialTheme.typography.bodyMedium,
-                color = MaterialTheme.colorScheme.onPrimaryContainer,
-            )
-            if (message.files.isNotEmpty()) {
-                Spacer(modifier = Modifier.height(4.dp))
-                message.files.forEach { file ->
-                    Text(
-                        text = file.name ?: file.uri,
-                        style = MaterialTheme.typography.labelSmall,
-                        color = MaterialTheme.colorScheme.onPrimaryContainer.copy(alpha = 0.7f),
-                    )
-                }
-            }
-        }
+@Composable private fun PartContent(part: LegacyPart, streamingText: Map<String, String>) {
+    when (part.type) {
+        "text" -> { val t = streamingText["${part.messageID}:${part.id}"] ?: (part.text ?: ""); Box(Modifier.widthIn(max=360.dp).clip(RoundedCornerShape(4.dp,16.dp,16.dp,16.dp)).background(MaterialTheme.colorScheme.surfaceVariant).padding(12.dp)) { Text(t, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant) } }
+        "reasoning" -> { val t = streamingText["${part.messageID}:${part.id}"] ?: (part.text ?: ""); Box(Modifier.fillMaxWidth().padding(vertical=2.dp).clip(RoundedCornerShape(8.dp)).background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha=.5f)).padding(8.dp)) { Column { Text("Thinking", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.tertiary); Spacer(Modifier.height(4.dp)); Text(t, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant) } } }
+        "tool" -> ToolPart(part)
+        "compaction" -> Box(Modifier.fillMaxWidth(), contentAlignment = Alignment.Center) { Text("Context compacted", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.outline, modifier = Modifier.padding(vertical=4.dp)) }
+         "agent" -> Box(Modifier.fillMaxWidth(), contentAlignment = Alignment.Center) { Text("Agent: ${part.name ?: ""}", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.outline, modifier = Modifier.padding(vertical=4.dp)) }
     }
 }
 
-@Composable
-private fun AssistantBubble(message: SessionMessage.Assistant) {
-    Column(
-        modifier = Modifier
-            .fillMaxWidth()
-            .padding(start = 8.dp),
-    ) {
-        if (message.content.isEmpty() && message.error != null) {
-            ErrorContent(message)
-        } else {
-            message.content.forEach { content ->
-                AssistantContentItem(content)
-            }
-        }
-
-        if (message.error != null && (message.content.isNotEmpty() || message.finish != null)) {
-            Spacer(modifier = Modifier.height(8.dp))
-            ErrorContent(message)
-        }
-    }
+@Composable private fun ToolPart(part: LegacyPart) {
+    val tc = when(part.state?.status) { "pending"->MaterialTheme.colorScheme.outline; "running"->MaterialTheme.colorScheme.tertiary; "completed"->MaterialTheme.colorScheme.primary; "error"->MaterialTheme.colorScheme.error; else->MaterialTheme.colorScheme.outline }
+    val label = toolLabel(part)
+    if (part.tool == "bash") Box(Modifier.fillMaxWidth().padding(vertical=2.dp).clip(RoundedCornerShape(8.dp)).background(Color(0xFF1E1E2E)).padding(10.dp)) {
+        Column { Row(verticalAlignment = Alignment.CenterVertically) { Image(painterResource(Res.drawable.terminal), null, Modifier.size(14.dp)); Spacer(Modifier.width(6.dp)); Text(label, style = MaterialTheme.typography.bodySmall, fontFamily = FontFamily.Monospace, color = Color(0xFFCDD6F4), maxLines=1); Spacer(Modifier.weight(1f)); Box(Modifier.size(6.dp).clip(CircleShape).background(tc)) }
+            if (part.state is LegacyToolState.Running) { Spacer(Modifier.height(4.dp)); Row(verticalAlignment = Alignment.CenterVertically) { CircularProgressIndicator(Modifier.size(12.dp), strokeWidth=1.5.dp); Spacer(Modifier.width(8.dp)); Text("Running...", style = MaterialTheme.typography.bodySmall, color = Color(0xFFA6ADC8)) } } }
+    } else Row(Modifier.padding(vertical=2.dp), verticalAlignment = Alignment.CenterVertically) { Box(Modifier.size(6.dp).clip(CircleShape).background(tc)); Spacer(Modifier.width(6.dp)); Image(painterResource(Res.drawable.file), null, Modifier.size(14.dp)); Spacer(Modifier.width(4.dp)); Text(label, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines=1); Spacer(Modifier.weight(1f)); Text(part.state?.status ?: "", style = MaterialTheme.typography.labelSmall, color = tc.copy(alpha=.7f)) }
 }
 
-@Composable
-private fun ErrorContent(message: SessionMessage.Assistant) {
-    val errorMsg = message.error?.message ?: "Unknown error"
-    val isRateLimit = errorMsg.contains("429", ignoreCase = true) || errorMsg.contains("rate limit", ignoreCase = true)
-    Box(
-        modifier = Modifier
-            .fillMaxWidth()
-            .clip(RoundedCornerShape(12.dp))
-            .background(MaterialTheme.colorScheme.errorContainer)
-            .padding(14.dp),
-    ) {
-        Row(verticalAlignment = Alignment.Top) {
-            Image(
-                painter = painterResource(if (isRateLimit) Res.drawable.clock else Res.drawable.triangle_alert),
-                contentDescription = if (isRateLimit) "Rate limited" else "Error",
-                modifier = Modifier.size(22.dp),
-            )
-            Spacer(modifier = Modifier.width(10.dp))
-            Column {
-                Text(
-                    text = if (isRateLimit) "Rate limited" else "Error",
-                    style = MaterialTheme.typography.labelLarge,
-                    color = MaterialTheme.colorScheme.onErrorContainer,
-                )
-                Spacer(modifier = Modifier.height(4.dp))
-                Text(
-                    text = errorMsg,
-                    style = MaterialTheme.typography.bodyMedium,
-                    color = MaterialTheme.colorScheme.onErrorContainer,
-                )
-            }
-        }
+private fun toolLabel(part: LegacyPart): String {
+    val input = when(val s=part.state) { is LegacyToolState.Pending->s.input; is LegacyToolState.Running->s.input; is LegacyToolState.Completed->s.input; is LegacyToolState.Error->s.input; null->null }
+    val obj = input as? JsonObject ?: return part.tool ?: "tool"
+    return when(part.tool) {
+        "read","write","edit" -> obj["filePath"]?.toString()?.removeSurrounding("\"")?.substringAfterLast('/')?.ifEmpty{null} ?: (part.tool ?: "tool")
+        "glob","grep" -> obj["pattern"]?.toString()?.removeSurrounding("\"").let{ if(it!=null&&it.length>40) it.take(40)+"..." else it} ?: (part.tool ?: "tool")
+        "bash" -> obj["command"]?.toString()?.removeSurrounding("\"").let{ if(it!=null) "$$it" else null} ?: "bash"
+        else -> part.tool ?: "tool"
     }
 }
-
-@Composable
-private fun AssistantContentItem(content: AssistantContent) {
-    when (content) {
-        is AssistantContent.Text -> TextContent(content)
-        is AssistantContent.Reasoning -> ReasoningContent(content)
-        is AssistantContent.Tool -> ToolContent(content)
-    }
-}
-
-@Composable
-private fun TextContent(content: AssistantContent.Text) {
-    Box(
-        modifier = Modifier
-            .widthIn(max = 360.dp)
-            .clip(RoundedCornerShape(4.dp, 16.dp, 16.dp, 16.dp))
-            .background(MaterialTheme.colorScheme.surfaceVariant)
-            .padding(12.dp),
-    ) {
-        Text(
-            text = content.text,
-            style = MaterialTheme.typography.bodyMedium,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
-        )
-    }
-}
-
-@Composable
-private fun ReasoningContent(content: AssistantContent.Reasoning) {
-    Box(
-        modifier = Modifier
-            .fillMaxWidth()
-            .padding(vertical = 4.dp)
-            .clip(RoundedCornerShape(8.dp))
-            .background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f))
-            .padding(8.dp),
-    ) {
-        Column {
-            Text(
-                text = "Thinking",
-                style = MaterialTheme.typography.labelSmall,
-                color = MaterialTheme.colorScheme.tertiary,
-            )
-            Spacer(modifier = Modifier.height(4.dp))
-            Text(
-                text = content.text,
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                fontFamily = FontFamily.Default,
-            )
-        }
-    }
-}
-
-@Composable
-private fun ToolContent(content: AssistantContent.Tool) {
-    val toolColor = when (content.state.status) {
-        "pending" -> MaterialTheme.colorScheme.outline
-        "running" -> MaterialTheme.colorScheme.tertiary
-        "completed" -> MaterialTheme.colorScheme.primary
-        "error" -> MaterialTheme.colorScheme.error
-        else -> MaterialTheme.colorScheme.outline
-    }
-
-    Box(
-        modifier = Modifier
-            .fillMaxWidth()
-            .padding(vertical = 4.dp)
-            .clip(RoundedCornerShape(8.dp))
-            .background(toolColor.copy(alpha = 0.1f))
-            .padding(12.dp),
-    ) {
-        Column {
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Box(
-                    modifier = Modifier
-                        .size(8.dp)
-                        .clip(CircleShape)
-                        .background(toolColor),
-                )
-                Spacer(modifier = Modifier.width(8.dp))
-                Text(
-                    text = content.name,
-                    style = MaterialTheme.typography.labelMedium,
-                    color = toolColor,
-                )
-                Spacer(modifier = Modifier.weight(1f))
-                Text(
-                    text = content.state.status,
-                    style = MaterialTheme.typography.labelSmall,
-                    color = toolColor.copy(alpha = 0.7f),
-                )
-            }
-
-            ToolStateContent(content.state)
-        }
-    }
-}
-
-@Composable
-private fun ToolStateContent(state: ToolState) {
-    when (state) {
-        is ToolState.Completed -> {
-            val inputText = extractToolInput(state.input)
-            if (inputText.isNotEmpty()) {
-                Spacer(modifier = Modifier.height(6.dp))
-                Text(
-                    text = inputText,
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurface,
-                    fontFamily = FontFamily.Monospace,
-                    maxLines = 6,
-                )
-            }
-        }
-        is ToolState.Error -> {
-            Spacer(modifier = Modifier.height(6.dp))
-            Text(
-                text = state.error.message,
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.error,
-            )
-        }
-        is ToolState.Running -> {
-            Spacer(modifier = Modifier.height(6.dp))
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                CircularProgressIndicator(
-                    modifier = Modifier.size(12.dp),
-                    strokeWidth = 1.5.dp,
-                )
-                Spacer(modifier = Modifier.width(8.dp))
-                Text(
-                    text = "Running...",
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.tertiary,
-                )
-            }
-        }
-        is ToolState.Pending -> {
-            Spacer(modifier = Modifier.height(6.dp))
-            Text(
-                text = "Pending...",
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.outline,
-            )
-        }
-    }
-}
-
-@Composable
-private fun SystemBubble(message: SessionMessage.SystemMsg) {
-    Box(
-        modifier = Modifier.fillMaxWidth(),
-        contentAlignment = Alignment.Center,
-    ) {
-        Text(
-            text = message.text,
-            style = MaterialTheme.typography.labelSmall,
-            color = MaterialTheme.colorScheme.outline,
-            modifier = Modifier.padding(vertical = 4.dp),
-        )
-    }
-}
-
-@Composable
-private fun ShellBubble(message: SessionMessage.Shell) {
-    Column(
-        modifier = Modifier.fillMaxWidth(),
-    ) {
-        Box(
-            modifier = Modifier
-                .clip(RoundedCornerShape(8.dp))
-                .background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f))
-                .padding(12.dp),
-        ) {
-            Column {
-                Text(
-                    text = "$ ${message.command}",
-                    style = MaterialTheme.typography.bodySmall,
-                    fontFamily = FontFamily.Monospace,
-                    color = MaterialTheme.colorScheme.onSurface,
-                )
-                if (message.output.isNotEmpty()) {
-                    Spacer(modifier = Modifier.height(6.dp))
-                    Text(
-                        text = message.output,
-                        style = MaterialTheme.typography.bodySmall,
-                        fontFamily = FontFamily.Monospace,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        maxLines = 12,
-                    )
-                }
-            }
-        }
-    }
-}
-
-@Composable
-private fun SyntheticBubble(message: SessionMessage.Synthetic) {
-    Box(
-        modifier = Modifier.fillMaxWidth(),
-        contentAlignment = Alignment.Center,
-    ) {
-        Text(
-            text = message.text,
-            style = MaterialTheme.typography.labelSmall,
-            color = MaterialTheme.colorScheme.outline,
-            modifier = Modifier.padding(vertical = 4.dp),
-        )
-    }
-}
-
-@Composable
-private fun AgentSwitchedBubble(message: SessionMessage.AgentSwitched) {
-    Box(
-        modifier = Modifier.fillMaxWidth(),
-        contentAlignment = Alignment.Center,
-    ) {
-        Text(
-            text = "Agent: ${message.agent}",
-            style = MaterialTheme.typography.labelSmall,
-            color = MaterialTheme.colorScheme.outline,
-            modifier = Modifier.padding(vertical = 4.dp),
-        )
-    }
-}
-
-@Composable
-private fun ModelSwitchedBubble(message: SessionMessage.ModelSwitched) {
-    Box(
-        modifier = Modifier.fillMaxWidth(),
-        contentAlignment = Alignment.Center,
-    ) {
-        Text(
-            text = "Model: ${message.model.providerID}/${message.model.modelID}",
-            style = MaterialTheme.typography.labelSmall,
-            color = MaterialTheme.colorScheme.outline,
-            modifier = Modifier.padding(vertical = 4.dp),
-        )
-    }
-}
-
-@Composable
-private fun CompactionBubble(message: SessionMessage.Compaction) {
-    Box(
-        modifier = Modifier.fillMaxWidth(),
-        contentAlignment = Alignment.Center,
-    ) {
-        Column(
-            horizontalAlignment = Alignment.CenterHorizontally,
-        ) {
-            Text(
-                text = "Context compacted (${message.reason})",
-                style = MaterialTheme.typography.labelSmall,
-                color = MaterialTheme.colorScheme.outline,
-            )
-            Text(
-                text = message.summary,
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.outline,
-                maxLines = 3,
-            )
-        }
-    }
-}
-
-@Composable
-private fun UnknownBubble(message: SessionMessage.Unknown) {
-    Column(
-        modifier = Modifier
-            .fillMaxWidth()
-            .padding(vertical = 4.dp)
-            .clip(RoundedCornerShape(8.dp))
-            .background(MaterialTheme.colorScheme.errorContainer.copy(alpha = 0.3f))
-            .padding(8.dp),
-    ) {
-        Text(
-            text = "${message.messageType}: ${message.id}",
-            style = MaterialTheme.typography.labelSmall,
-            color = MaterialTheme.colorScheme.outline,
-        )
-        if (message.parseError.isNotEmpty()) {
-            Text(
-                text = message.parseError,
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.error,
-                maxLines = 3,
-            )
-        }
-    }
-}
-
-@Composable
-private fun StreamingIndicator() {
-    Box(
-        modifier = Modifier.fillMaxWidth(),
-        contentAlignment = Alignment.Center,
-    ) {
-        Row(
-            verticalAlignment = Alignment.CenterVertically,
-            modifier = Modifier.padding(vertical = 8.dp),
-        ) {
-            CircularProgressIndicator(
-                modifier = Modifier.size(16.dp),
-                strokeWidth = 2.dp,
-            )
-            Spacer(modifier = Modifier.width(8.dp))
-            Text(
-                text = "OpenCode is responding...",
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.outline,
-            )
-        }
-    }
-}
-
-private fun extractToolInput(input: kotlinx.serialization.json.JsonElement?): String {
-    if (input == null) return ""
-    return try {
-        when (input) {
-            is kotlinx.serialization.json.JsonObject -> {
-                val entries = input.entries.take(4).joinToString("\n") { "${it.key}: ${it.value}" }
-                if (input.size > 4) "$entries\n..."
-                else entries
-            }
-            is kotlinx.serialization.json.JsonPrimitive -> input.content
-            else -> input.toString()
-        }
-    } catch (_: Exception) {
-        ""
-    }
-}
-
