@@ -22,6 +22,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material3.Button
+import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.IconButton
@@ -52,7 +53,11 @@ import page.dera.opencode.api.LegacyPart
 import page.dera.opencode.api.LegacyToolState
 import page.dera.opencode.api.LegacyWithParts
 import page.dera.opencode.api.OpencodeApi
+import page.dera.opencode.api.PermissionRequest
+import page.dera.opencode.api.PermissionToolRef
 import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.contentOrNull
+import kotlinx.serialization.json.jsonArray
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
 import com.mikepenz.markdown.m3.Markdown
@@ -76,10 +81,12 @@ fun SessionDetailScreen(api: OpencodeApi, sessionId: String, sessionTitle: Strin
     var errorText by remember { mutableStateOf<String?>(null) }
     val streamingText = remember { mutableStateMapOf<String, String>() }
     var streamVersion by remember { mutableStateOf(0) }
+    val permissionRequests = remember { mutableStateListOf<PermissionRequest>() }
     val scope = rememberCoroutineScope()
 
     LaunchedEffect(sessionId) {
         isLoading = true
+        permissionRequests.clear()
         api.getSessionMessages(sessionId).onSuccess { messages.clear(); messages.addAll(it) }.onFailure { errorText = it.message }
         isLoading = false
     }
@@ -117,6 +124,30 @@ fun SessionDetailScreen(api: OpencodeApi, sessionId: String, sessionTitle: Strin
                         isRunning = false
                         api.getSessionMessages(sessionId).onSuccess { messages.clear(); messages.addAll(it) }
                     }
+                    "permission.asked" -> {
+                        println("OC_DBG: permission.asked props=$props")
+                        val id = props["id"]?.jsonPrimitive?.content ?: return@collect
+                        val permission = props["permission"]?.jsonPrimitive?.content ?: ""
+                        val patterns = props["patterns"]?.jsonArray?.mapNotNull { it.jsonPrimitive.contentOrNull } ?: emptyList()
+                        val always = props["always"]?.jsonArray?.mapNotNull { it.jsonPrimitive.contentOrNull } ?: emptyList()
+                        val toolJson = props["tool"]?.jsonObject
+                        val tool = toolJson?.let {
+                            PermissionRequest(
+                                id = id, sessionID = sid, permission = permission,
+                                patterns = patterns, always = always,
+                                tool = PermissionToolRef(
+                                    messageID = it["messageID"]?.jsonPrimitive?.content ?: "",
+                                    callID = it["callID"]?.jsonPrimitive?.content ?: ""
+                                )
+                            )
+                        } ?: PermissionRequest(id = id, sessionID = sid, permission = permission, patterns = patterns, always = always)
+                        if (permissionRequests.none { it.id == id }) permissionRequests.add(tool)
+                    }
+                    "permission.replied" -> {
+                        val rid = props["requestID"]?.jsonPrimitive?.content ?: return@collect
+                        println("OC_DBG: permission.replied requestID=$rid")
+                        permissionRequests.removeAll { it.id == rid }
+                    }
                 }
             }
         } catch (_: Exception) { }
@@ -144,6 +175,7 @@ fun SessionDetailScreen(api: OpencodeApi, sessionId: String, sessionTitle: Strin
     ) { padding ->
         Column(Modifier.fillMaxSize().padding(padding)) {
             if (errorText != null) Box(Modifier.fillMaxWidth().background(MaterialTheme.colorScheme.errorContainer).padding(12.dp)) { Text(errorText!!, color = MaterialTheme.colorScheme.onErrorContainer, style = MaterialTheme.typography.bodyMedium) }
+            permissionRequests.forEach { req -> PermissionPrompt(req, api, sessionId, directory) }
             if (messages.isEmpty() && !isLoading) Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) { Text(sessionTitle.ifEmpty { "Session" }, style = MaterialTheme.typography.headlineSmall) }
             else {
                 LazyColumn(state = listState, modifier = Modifier.fillMaxSize(), verticalArrangement = Arrangement.spacedBy(6.dp), contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = 12.dp, vertical = 8.dp)) {
@@ -156,6 +188,65 @@ fun SessionDetailScreen(api: OpencodeApi, sessionId: String, sessionTitle: Strin
 }
 
 @Composable private fun SendingIndicator() = Box(Modifier.fillMaxWidth(), contentAlignment = Alignment.Center) { Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.padding(8.dp)) { CircularProgressIndicator(Modifier.size(16.dp), strokeWidth = 2.dp); Spacer(Modifier.width(8.dp)); Text("OpenCode responding...", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.outline) } }
+
+@Composable private fun PermissionPrompt(req: PermissionRequest, api: OpencodeApi, sessionId: String, directory: String) {
+    val scope = rememberCoroutineScope()
+    var replying by remember { mutableStateOf(false) }
+    val label = when (req.permission) {
+        "tool_execution" -> "Run tool: ${req.tool?.callID?.takeLast(40) ?: "unknown"}"
+        "read_file" -> "Read file: ${req.patterns.firstOrNull()?.substringAfterLast('/') ?: "unknown"}"
+        "write_file" -> "Write file: ${req.patterns.firstOrNull()?.substringAfterLast('/') ?: "unknown"}"
+        "edit_file" -> "Edit file: ${req.patterns.firstOrNull()?.substringAfterLast('/') ?: "unknown"}"
+        else -> "${req.permission}: ${req.patterns.firstOrNull()?.takeLast(50) ?: "unknown"}"
+    }
+    Box(Modifier.fillMaxWidth().clip(RoundedCornerShape(12.dp)).background(MaterialTheme.colorScheme.secondaryContainer).padding(12.dp)) {
+        Column {
+            Text("Permission required", style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.onSecondaryContainer)
+            Spacer(Modifier.height(4.dp))
+            Text(label, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSecondaryContainer)
+            if (req.patterns.isNotEmpty()) {
+                Spacer(Modifier.height(2.dp))
+                Text(req.patterns.joinToString(", ") { it.takeLast(60) }, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSecondaryContainer.copy(alpha = .7f))
+            }
+            Spacer(Modifier.height(8.dp))
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                Button(onClick = {
+                    replying = true
+                    scope.launch {
+                        println("OC_DBG: permission approve always ${req.id}")
+                        api.replyPermission(sessionId, req.id, "always", directory)
+                        replying = false
+                    }
+                }, enabled = !replying) {
+                    Text("Always allow")
+                }
+                Button(onClick = {
+                    replying = true
+                    scope.launch {
+                        println("OC_DBG: permission approve once ${req.id}")
+                        api.replyPermission(sessionId, req.id, "once", directory)
+                        replying = false
+                    }
+                }, enabled = !replying) {
+                    Text("Approve once")
+                }
+                Button(onClick = {
+                    replying = true
+                    scope.launch {
+                        println("OC_DBG: permission reject ${req.id}")
+                        api.replyPermission(sessionId, req.id, "reject", directory)
+                        replying = false
+                    }
+                }, enabled = !replying, colors = ButtonDefaults.buttonColors(
+                    containerColor = MaterialTheme.colorScheme.errorContainer,
+                    contentColor = MaterialTheme.colorScheme.onErrorContainer
+                )) {
+                    Text("Deny")
+                }
+            }
+        }
+    }
+}
 
 @Composable private fun MessageCard(msg: LegacyWithParts, streamingText: Map<String, String>, streamVersion: Int) {
     streamVersion

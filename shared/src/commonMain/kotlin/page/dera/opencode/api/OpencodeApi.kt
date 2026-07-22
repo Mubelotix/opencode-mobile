@@ -83,6 +83,18 @@ class OpencodeApi(
         } catch (e: Exception) { Result.failure(e) }
     }
 
+    suspend fun replyPermission(sessionId: String, requestId: String, reply: String, directory: String): Result<Unit> {
+        return try {
+            val resp = client.post("$serverUrl/permission/$requestId/reply") {
+                authHeader()?.let { (k, v) -> header(k, v) }; contentType(ContentType.Application.Json)
+                url.parameters.append("directory", directory)
+                setBody(json.encodeToString(PermissionReplyPayload.serializer(), PermissionReplyPayload(reply)))
+            }
+            println("OC_DBG: permission reply status=${resp.status} requestId=$requestId reply=$reply")
+            if (resp.status.isSuccess()) Result.success(Unit) else Result.failure(Exception("HTTP ${resp.status.value}"))
+        } catch (e: Exception) { println("OC_DBG: permission reply error=${e.message}"); Result.failure(e) }
+    }
+
     suspend fun sendPrompt(sessionId: String, text: String): Result<Unit> {
         return try {
             val p = LegacyPromptPayload(parts = listOf(LegacyPromptPart(type = "text", text = text, synthetic = false)))
@@ -130,3 +142,6 @@ data class GlobalEvent(
 )
 @kotlinx.serialization.Serializable
 data class GlobalEventPayload(val type: String = "", val properties: kotlinx.serialization.json.JsonElement? = null)
+
+@kotlinx.serialization.Serializable
+data class PermissionReplyPayload(val reply: String, val message: String? = null)

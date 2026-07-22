@@ -226,3 +226,20 @@ data class LegacyPromptPart(
     val text: String,
     val synthetic: Boolean = false,
 )
+
+@Serializable
+data class PermissionRequest(
+    val id: String = "",
+    val sessionID: String = "",
+    val permission: String = "",
+    val patterns: List<String> = emptyList(),
+    val metadata: JsonElement? = null,
+    val always: List<String> = emptyList(),
+    val tool: PermissionToolRef? = null,
+)
+
+@Serializable
+data class PermissionToolRef(
+    val messageID: String = "",
+    val callID: String = "",
+)
