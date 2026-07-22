@@ -16,9 +16,10 @@ Lucide icon set — 24x24, stroke-based, ISC license. 1600+ icons.
 1. Browse/search icons: https://composables.com/icons/icon-libraries/lucide
 2. Download as XML VectorDrawable:
    ```bash
-   curl -sL "https://composables.com/download/icons/lucide/<icon-name>.xml" \
+   curl -sL "https://composables.com/download/icons/lucide/<icon-name>.xml?download=vector-drawable" \
      -o shared/src/commonMain/composeResources/drawable/<icon-name>.xml
    ```
+   If the icon name is not found, consult the icon index at Composables (hyphens in names from the site match the XML URL path). Search the icon index first: `https://composables.com/icons/icon-libraries/lucide`.
 3. Fix color reference: replace `@color/black` → `#FF000000` (this project has no color resources). **Do this first before any other XML edits** — otherwise `sed` transformations may miss nested references.
    ```bash
    sed -i 's/@color\/black/#FF000000/g' shared/src/commonMain/composeResources/drawable/<icon-name>.xml

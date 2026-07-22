@@ -62,5 +62,30 @@ adb logcat -d | grep -i "snapshot\|compose.*error\|compose.*crash"
 ```
 Rarely needed but useful for `IllegalStateException: Reading a state that was created after the snapshot was taken`.
 
+## App-Level Debug Logging
+
+For non-crash issues (API failures, serialization errors, logic bugs), add `println()` with a unique prefix in KMP `commonMain`, then capture via ADB:
+
+**Step 1: Add logging to code**
+```kotlin
+println("OC_DBG: something went wrong: ${e.message}")
+```
+`println` in KMP commonMain writes to stdout, which Android routes to logcat under tag `System.out` at INFO level.
+
+**Step 2: Deploy, clear buffer, capture**
+```bash
+adb logcat -c  # clear
+# ... reproduce the issue ...
+timeout 20 adb logcat -s "System.out:I" 2>&1 | grep "OC_DBG"
+```
+
+**Step 3: One-liner for build+deploy+capture**
+```bash
+./gradlew :androidApp:assembleDebug | tail -3 && adb install -r androidApp/build/outputs/apk/debug/androidApp-debug.apk && adb shell am start -n page.dera.opencode/.MainActivity && sleep 2 && adb logcat -c && echo "Reproduce now" && timeout 20 adb logcat -s "System.out:I" 2>&1 | grep "OC_DBG"
+```
+
+**Important:** Remove or quiet debug prints before merging. Use a unique prefix (e.g., `OC_DBG`) for easy filtering. The `-s` flag filters to only `System.out` tag at INFO level—no system noise.
+
 ## Changelog
 - 2026-07-22: Created after discovering `adb logcat -d` with no filter hides crashes in hardware sensor noise
+- 2026-07-22: Added `println` + `adb logcat -s "System.out:I"` technique for KMP app-level debug logging
