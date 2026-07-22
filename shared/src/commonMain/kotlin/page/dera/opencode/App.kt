@@ -109,6 +109,7 @@ fun App() {
             is Screen.SessionDetail -> {
                 BackHandler { screen = Screen.ProjectDetail(current.api, current.directory, current.projectName) }
                 SessionDetailScreen(
+                    api = current.api,
                     sessionId = current.session.id,
                     sessionTitle = current.session.title,
                     onBack = { screen = Screen.ProjectDetail(current.api, current.directory, current.projectName) },
