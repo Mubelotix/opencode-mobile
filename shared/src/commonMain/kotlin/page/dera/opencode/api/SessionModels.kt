@@ -46,8 +46,16 @@ data class SessionLocation(
 )
 
 @Serializable
+data class SessionCreateModel(
+    val id: String,
+    @SerialName("providerID")
+    val providerID: String,
+)
+
+@Serializable
 data class SessionCreatePayload(
     val location: CreateSessionLocation,
+    val model: SessionCreateModel? = null,
 )
 
 @Serializable
@@ -58,4 +66,71 @@ data class CreateSessionLocation(
 @Serializable
 data class SessionCreateResponse(
     val data: SessionInfo,
+)
+
+@Serializable
+data class PromptPayload(
+    val prompt: PromptBody,
+    val delivery: String? = null,
+    val resume: Boolean? = null,
+)
+
+@Serializable
+data class PromptBody(
+    val text: String,
+    val files: List<PromptFileAttachment>? = null,
+    val agents: List<PromptAgentAttachment>? = null,
+)
+
+@Serializable
+data class PromptFileAttachment(
+    val uri: String,
+    val name: String? = null,
+    val description: String? = null,
+    val source: FileAttachmentSource? = null,
+)
+
+@Serializable
+data class PromptAgentAttachment(
+    val name: String,
+    val source: FileAttachmentSource? = null,
+)
+
+@Serializable
+data class PromptResponse(
+    val data: SessionInputAdmitted,
+)
+
+@Serializable
+data class SessionInputAdmitted(
+    val admittedSeq: Long,
+    val id: String,
+    @SerialName("sessionID")
+    val sessionID: String,
+    val prompt: PromptData,
+    val delivery: String,
+    val timeCreated: Long,
+    val promotedSeq: Long? = null,
+)
+
+@Serializable
+data class PromptData(
+    val text: String,
+    val files: List<PromptFileResponse>? = null,
+    val agents: List<PromptAgentResponse>? = null,
+)
+
+@Serializable
+data class PromptFileResponse(
+    val uri: String,
+    val mime: String,
+    val name: String? = null,
+    val description: String? = null,
+    val source: FileAttachmentSource? = null,
+)
+
+@Serializable
+data class PromptAgentResponse(
+    val name: String,
+    val source: FileAttachmentSource? = null,
 )
