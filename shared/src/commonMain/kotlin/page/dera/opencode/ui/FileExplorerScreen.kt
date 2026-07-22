@@ -2,6 +2,7 @@ package page.dera.opencode.ui
 
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -204,10 +205,13 @@ fun FileExplorerScreen(
                                         Image(
                                             painter = painterResource(if (filled) Res.drawable.star_filled else Res.drawable.star),
                                             contentDescription = if (filled) "Unstar" else "Star",
-                                            modifier = Modifier.size(20.dp).clickable {
+                                            modifier = Modifier.size(36.dp).clickable(
+                                                indication = null,
+                                                interactionSource = remember { MutableInteractionSource() },
+                                            ) {
                                                 settings.togglePinnedFolder(fullPath)
                                                 pinnedFolders = settings.pinnedFolders
-                                            },
+                                            }.padding(8.dp),
                                             )
                                     }
                                 }

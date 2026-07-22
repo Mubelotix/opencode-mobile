@@ -2,6 +2,7 @@ package page.dera.opencode.ui
 
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -19,7 +20,6 @@ import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
-import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Scaffold
@@ -81,16 +81,20 @@ fun ProjectScreen(api: OpencodeApi, directory: String, name: String, settings: A
                 title = { Text(name) },
                 actions = {
                     var starred by remember { mutableStateOf(settings.isPinned(directory)) }
-                    IconButton(onClick = {
-                        settings.togglePinnedFolder(directory)
-                        starred = settings.isPinned(directory)
-                    }) {
-                        Image(
-                            painter = painterResource(if (starred) Res.drawable.star_filled else Res.drawable.star),
-                            contentDescription = if (starred) "Unstar" else "Star",
-                            modifier = Modifier.size(24.dp),
-                        )
-                    }
+                    Image(
+                        painter = painterResource(if (starred) Res.drawable.star_filled else Res.drawable.star),
+                        contentDescription = if (starred) "Unstar" else "Star",
+                        modifier = Modifier
+                            .size(40.dp)
+                            .clickable(
+                                indication = null,
+                                interactionSource = remember { MutableInteractionSource() },
+                            ) {
+                                settings.togglePinnedFolder(directory)
+                                starred = settings.isPinned(directory)
+                            }
+                            .padding(8.dp),
+                    )
                 },
             )
         },
