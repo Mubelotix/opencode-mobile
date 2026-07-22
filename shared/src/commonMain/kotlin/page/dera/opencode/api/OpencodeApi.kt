@@ -54,10 +54,10 @@ class OpencodeApi(
         }
     }
 
-    suspend fun listSessions(projectID: String, cursor: String? = null): Result<SessionsResponse> {
+    suspend fun listSessions(directory: String, cursor: String? = null): Result<SessionsResponse> {
         return try {
             val params = buildList {
-                add("project" to projectID)
+                add("directory" to directory)
                 add("limit" to "30")
                 if (cursor != null) add("cursor" to cursor)
             }
@@ -68,6 +68,21 @@ class OpencodeApi(
             val body = response.bodyAsText()
             val sessionsResponse = json.decodeFromString<SessionsResponse>(body)
             Result.success(sessionsResponse)
+        } catch (e: Exception) {
+            Result.failure(e)
+        }
+    }
+
+    suspend fun listFiles(directory: String, path: String = "."): Result<FsListResponse> {
+        return try {
+            val response = client.get("$serverUrl/api/fs/list") {
+                authHeader()?.let { (key, value) -> header(key, value) }
+                header("x-opencode-directory", directory)
+                url.parameters.append("path", path)
+            }
+            val body = response.bodyAsText()
+            val result = json.decodeFromString<FsListResponse>(body)
+            Result.success(result)
         } catch (e: Exception) {
             Result.failure(e)
         }

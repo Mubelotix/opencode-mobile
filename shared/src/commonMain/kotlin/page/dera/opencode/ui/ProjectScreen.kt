@@ -28,12 +28,11 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import kotlinx.coroutines.launch
 import page.dera.opencode.api.OpencodeApi
-import page.dera.opencode.api.ProjectInfo
 import page.dera.opencode.api.SessionInfo
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun ProjectScreen(api: OpencodeApi, project: ProjectInfo, onBack: () -> Unit, onSessionClick: (SessionInfo) -> Unit) {
+fun ProjectScreen(api: OpencodeApi, directory: String, name: String, onBack: () -> Unit, onSessionClick: (SessionInfo) -> Unit) {
     var sessions by remember { mutableStateOf<List<SessionInfo>>(emptyList()) }
     var nextCursor by remember { mutableStateOf<String?>(null) }
     var hasMore by remember { mutableStateOf(false) }
@@ -52,7 +51,7 @@ fun ProjectScreen(api: OpencodeApi, project: ProjectInfo, onBack: () -> Unit, on
     }
 
     LaunchedEffect(Unit) {
-        val result = api.listSessions(projectID = project.id)
+        val result = api.listSessions(directory = directory)
         result.fold(
             onSuccess = { handlePage(it, append = false) },
             onFailure = { errorMessage = it.message ?: "Failed to load sessions" },
@@ -63,7 +62,7 @@ fun ProjectScreen(api: OpencodeApi, project: ProjectInfo, onBack: () -> Unit, on
     Scaffold(
         topBar = {
             TopAppBar(
-                title = { Text(project.name ?: project.worktree.trimEnd('/').split('/').last()) },
+                title = { Text(name) },
             )
         },
         floatingActionButton = {
@@ -72,7 +71,7 @@ fun ProjectScreen(api: OpencodeApi, project: ProjectInfo, onBack: () -> Unit, on
                     if (!isCreating) {
                         isCreating = true
                         scope.launch {
-                            val result = api.createSession(project.worktree)
+                            val result = api.createSession(directory)
                             result.fold(
                                 onSuccess = { session ->
                                     onSessionClick(session)
@@ -113,7 +112,7 @@ fun ProjectScreen(api: OpencodeApi, project: ProjectInfo, onBack: () -> Unit, on
                             errorMessage = null
                             isLoading = true
                             scope.launch {
-                                val result = api.listSessions(projectID = project.id)
+        val result = api.listSessions(directory = directory)
                                 result.fold(
                                     onSuccess = { handlePage(it, append = false) },
                                     onFailure = { errorMessage = it.message ?: "Failed to load sessions" },
@@ -184,7 +183,7 @@ fun ProjectScreen(api: OpencodeApi, project: ProjectInfo, onBack: () -> Unit, on
                                         isLoadingMore = true
                                         scope.launch {
                                             val result = api.listSessions(
-                                                projectID = project.id,
+                                                directory = directory,
                                                 cursor = nextCursor,
                                             )
                                             result.fold(

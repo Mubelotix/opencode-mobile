@@ -14,7 +14,7 @@ import page.dera.opencode.api.ProjectInfo
 import page.dera.opencode.api.SessionInfo
 import page.dera.opencode.api.ValidationResult
 import page.dera.opencode.settings.AppSettings
-import page.dera.opencode.ui.HomeScreen
+import page.dera.opencode.ui.FileExplorerScreen
 import page.dera.opencode.ui.ProjectScreen
 import page.dera.opencode.ui.SessionDetailScreen
 import page.dera.opencode.ui.WelcomeScreen
@@ -22,9 +22,9 @@ import page.dera.opencode.ui.BackHandler
 
 private sealed class Screen {
     data class Loading(val api: OpencodeApi) : Screen()
-    data class ProjectList(val api: OpencodeApi) : Screen()
-    data class ProjectDetail(val api: OpencodeApi, val project: ProjectInfo) : Screen()
-    data class SessionDetail(val api: OpencodeApi, val project: ProjectInfo, val session: SessionInfo) : Screen()
+    data class Explorer(val api: OpencodeApi) : Screen()
+    data class ProjectDetail(val api: OpencodeApi, val directory: String, val name: String) : Screen()
+    data class SessionDetail(val api: OpencodeApi, val directory: String, val name: String, val session: SessionInfo) : Screen()
     data class Welcome(val api: OpencodeApi) : Screen()
 }
 
@@ -47,7 +47,7 @@ fun App() {
         if (screen is Screen.Loading) {
             val result = api.validate()
             screen = when (result) {
-                is ValidationResult.Success -> Screen.ProjectList(api)
+                is ValidationResult.Success -> Screen.Explorer(api)
                 is ValidationResult.Error -> Screen.Welcome(api)
             }
         }
@@ -64,35 +64,37 @@ fun App() {
                         settings.serverUrl = url
                         settings.serverPassword = pwd
                         val newApi = OpencodeApi(HttpClient(), OpencodeApi.normalizeUrl(url), pwd)
-                        screen = Screen.ProjectList(newApi)
+                        screen = Screen.Explorer(newApi)
                     },
                 )
             }
-            is Screen.ProjectList -> {
-                HomeScreen(
+            is Screen.Explorer -> {
+                FileExplorerScreen(
                     api = current.api,
-                    onProjectClick = { project ->
-                        screen = Screen.ProjectDetail(current.api, project)
+                    onOpenProject = { directory ->
+                        val name = directory.trimEnd('/').split('/').last().ifEmpty { directory }
+                        screen = Screen.ProjectDetail(current.api, directory, name)
                     },
                 )
             }
             is Screen.ProjectDetail -> {
-                BackHandler { screen = Screen.ProjectList(current.api) }
+                BackHandler { screen = Screen.Explorer(current.api) }
                 ProjectScreen(
                     api = current.api,
-                    project = current.project,
-                    onBack = { screen = Screen.ProjectList(current.api) },
+                    directory = current.directory,
+                    name = current.name,
+                    onBack = { screen = Screen.Explorer(current.api) },
                     onSessionClick = { session ->
-                        screen = Screen.SessionDetail(current.api, current.project, session)
+                        screen = Screen.SessionDetail(current.api, current.directory, current.name, session)
                     },
                 )
             }
             is Screen.SessionDetail -> {
-                BackHandler { screen = Screen.ProjectDetail(current.api, current.project) }
+                BackHandler { screen = Screen.ProjectDetail(current.api, current.directory, current.name) }
                 SessionDetailScreen(
                     sessionId = current.session.id,
                     sessionTitle = current.session.title,
-                    onBack = { screen = Screen.ProjectDetail(current.api, current.project) },
+                    onBack = { screen = Screen.ProjectDetail(current.api, current.directory, current.name) },
                 )
             }
         }
