@@ -3,7 +3,11 @@ package page.dera.opencode.api
 import io.ktor.client.HttpClient
 import io.ktor.client.request.get
 import io.ktor.client.request.header
+import io.ktor.client.request.post
+import io.ktor.client.request.setBody
 import io.ktor.client.statement.bodyAsText
+import io.ktor.http.ContentType
+import io.ktor.http.contentType
 import io.ktor.http.isSuccess
 import kotlin.io.encoding.Base64
 import kotlinx.serialization.json.Json
@@ -64,6 +68,22 @@ class OpencodeApi(
             val body = response.bodyAsText()
             val sessionsResponse = json.decodeFromString<SessionsResponse>(body)
             Result.success(sessionsResponse)
+        } catch (e: Exception) {
+            Result.failure(e)
+        }
+    }
+
+    suspend fun createSession(directory: String): Result<SessionInfo> {
+        return try {
+            val payload = SessionCreatePayload(location = CreateSessionLocation(directory))
+            val response = client.post("$serverUrl/api/session") {
+                authHeader()?.let { (key, value) -> header(key, value) }
+                contentType(ContentType.Application.Json)
+                setBody(json.encodeToString(SessionCreatePayload.serializer(), payload))
+            }
+            val body = response.bodyAsText()
+            val result = json.decodeFromString<SessionCreateResponse>(body)
+            Result.success(result.data)
         } catch (e: Exception) {
             Result.failure(e)
         }

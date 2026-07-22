@@ -44,3 +44,18 @@ data class SessionLocation(
     @SerialName("workspaceID")
     val workspaceID: String? = null,
 )
+
+@Serializable
+data class SessionCreatePayload(
+    val location: CreateSessionLocation,
+)
+
+@Serializable
+data class CreateSessionLocation(
+    val directory: String,
+)
+
+@Serializable
+data class SessionCreateResponse(
+    val data: SessionInfo,
+)

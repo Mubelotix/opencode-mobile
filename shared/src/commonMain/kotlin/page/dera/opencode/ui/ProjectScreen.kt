@@ -14,16 +14,7 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.material3.Card
-import androidx.compose.material3.CardDefaults
-import androidx.compose.material3.CircularProgressIndicator
-import androidx.compose.material3.ExperimentalMaterial3Api
-import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.OutlinedButton
-import androidx.compose.material3.Scaffold
-import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
-import androidx.compose.material3.TopAppBar
+import androidx.compose.material3.*
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -49,6 +40,7 @@ fun ProjectScreen(api: OpencodeApi, project: ProjectInfo, onBack: () -> Unit, on
     var errorMessage by remember { mutableStateOf<String?>(null) }
     var isLoading by remember { mutableStateOf(true) }
     var isLoadingMore by remember { mutableStateOf(false) }
+    var isCreating by remember { mutableStateOf(false) }
     val scope = rememberCoroutineScope()
     val limit = 30
 
@@ -73,6 +65,35 @@ fun ProjectScreen(api: OpencodeApi, project: ProjectInfo, onBack: () -> Unit, on
             TopAppBar(
                 title = { Text(project.name ?: project.worktree.trimEnd('/').split('/').last()) },
             )
+        },
+        floatingActionButton = {
+            FloatingActionButton(
+                onClick = {
+                    if (!isCreating) {
+                        isCreating = true
+                        scope.launch {
+                            val result = api.createSession(project.worktree)
+                            result.fold(
+                                onSuccess = { session ->
+                                    onSessionClick(session)
+                                },
+                                onFailure = { errorMessage = it.message ?: "Failed to create session" },
+                            )
+                            isCreating = false
+                        }
+                    }
+                },
+            ) {
+                if (isCreating) {
+                    CircularProgressIndicator(
+                        modifier = Modifier.size(24.dp),
+                        color = MaterialTheme.colorScheme.onPrimaryContainer,
+                        strokeWidth = 2.dp,
+                    )
+                } else {
+                    Text("+")
+                }
+            }
         },
     ) { padding ->
         when {
