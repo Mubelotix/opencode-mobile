@@ -10,10 +10,10 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.tooling.preview.Preview
 import io.ktor.client.HttpClient
 import page.dera.opencode.api.OpencodeApi
-import page.dera.opencode.api.ProjectInfo
 import page.dera.opencode.api.SessionInfo
 import page.dera.opencode.api.ValidationResult
 import page.dera.opencode.settings.AppSettings
+import page.dera.opencode.ui.StarredScreen
 import page.dera.opencode.ui.FileExplorerScreen
 import page.dera.opencode.ui.ProjectScreen
 import page.dera.opencode.ui.SessionDetailScreen
@@ -22,9 +22,10 @@ import page.dera.opencode.ui.BackHandler
 
 private sealed class Screen {
     data class Loading(val api: OpencodeApi) : Screen()
+    data class Starred(val api: OpencodeApi) : Screen()
     data class Explorer(val api: OpencodeApi) : Screen()
     data class ProjectDetail(val api: OpencodeApi, val directory: String, val name: String) : Screen()
-    data class SessionDetail(val api: OpencodeApi, val directory: String, val name: String, val session: SessionInfo) : Screen()
+    data class SessionDetail(val api: OpencodeApi, val directory: String, val projectName: String, val session: SessionInfo) : Screen()
     data class Welcome(val api: OpencodeApi) : Screen()
 }
 
@@ -47,7 +48,10 @@ fun App() {
         if (screen is Screen.Loading) {
             val result = api.validate()
             screen = when (result) {
-                is ValidationResult.Success -> Screen.Explorer(api)
+                is ValidationResult.Success -> {
+                    if (settings.pinnedFolders.isEmpty()) Screen.Explorer(api)
+                    else Screen.Starred(api)
+                }
                 is ValidationResult.Error -> Screen.Welcome(api)
             }
         }
@@ -64,13 +68,25 @@ fun App() {
                         settings.serverUrl = url
                         settings.serverPassword = pwd
                         val newApi = OpencodeApi(HttpClient(), OpencodeApi.normalizeUrl(url), pwd)
-                        screen = Screen.Explorer(newApi)
+                        screen = Screen.Starred(newApi)
+                    },
+                )
+            }
+            is Screen.Starred -> {
+                StarredScreen(
+                    settings = settings,
+                    onBrowseFiles = { screen = Screen.Explorer(current.api) },
+                    onOpenFolder = { path ->
+                        val name = path.trimEnd('/').split('/').last().ifEmpty { path }
+                        screen = Screen.ProjectDetail(current.api, path, name)
                     },
                 )
             }
             is Screen.Explorer -> {
+                BackHandler { screen = Screen.Starred(current.api) }
                 FileExplorerScreen(
                     api = current.api,
+                    settings = settings,
                     onOpenProject = { directory ->
                         val name = directory.trimEnd('/').split('/').last().ifEmpty { directory }
                         screen = Screen.ProjectDetail(current.api, directory, name)
@@ -78,23 +94,24 @@ fun App() {
                 )
             }
             is Screen.ProjectDetail -> {
-                BackHandler { screen = Screen.Explorer(current.api) }
+                BackHandler { screen = Screen.Starred(current.api) }
                 ProjectScreen(
                     api = current.api,
                     directory = current.directory,
                     name = current.name,
-                    onBack = { screen = Screen.Explorer(current.api) },
+                    settings = settings,
+                    onBack = { screen = Screen.Starred(current.api) },
                     onSessionClick = { session ->
                         screen = Screen.SessionDetail(current.api, current.directory, current.name, session)
                     },
                 )
             }
             is Screen.SessionDetail -> {
-                BackHandler { screen = Screen.ProjectDetail(current.api, current.directory, current.name) }
+                BackHandler { screen = Screen.ProjectDetail(current.api, current.directory, current.projectName) }
                 SessionDetailScreen(
                     sessionId = current.session.id,
                     sessionTitle = current.session.title,
-                    onBack = { screen = Screen.ProjectDetail(current.api, current.directory, current.name) },
+                    onBack = { screen = Screen.ProjectDetail(current.api, current.directory, current.projectName) },
                 )
             }
         }

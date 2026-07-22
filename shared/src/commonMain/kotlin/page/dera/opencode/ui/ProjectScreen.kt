@@ -1,5 +1,6 @@
 package page.dera.opencode.ui
 
+import androidx.compose.foundation.Image
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -18,6 +19,7 @@ import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Scaffold
@@ -38,10 +40,15 @@ import androidx.compose.ui.unit.dp
 import kotlinx.coroutines.launch
 import page.dera.opencode.api.OpencodeApi
 import page.dera.opencode.api.SessionInfo
+import page.dera.opencode.settings.AppSettings
+import opencodeapp.shared.generated.resources.Res
+import opencodeapp.shared.generated.resources.star
+import opencodeapp.shared.generated.resources.star_filled
+import org.jetbrains.compose.resources.painterResource
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun ProjectScreen(api: OpencodeApi, directory: String, name: String, onBack: () -> Unit, onSessionClick: (SessionInfo) -> Unit) {
+fun ProjectScreen(api: OpencodeApi, directory: String, name: String, settings: AppSettings, onBack: () -> Unit, onSessionClick: (SessionInfo) -> Unit) {
     var sessions by remember { mutableStateOf<List<SessionInfo>>(emptyList()) }
     var nextCursor by remember { mutableStateOf<String?>(null) }
     var hasMore by remember { mutableStateOf(false) }
@@ -70,7 +77,22 @@ fun ProjectScreen(api: OpencodeApi, directory: String, name: String, onBack: () 
 
     Scaffold(
         topBar = {
-            TopAppBar(title = { Text(name) })
+            TopAppBar(
+                title = { Text(name) },
+                actions = {
+                    var starred by remember { mutableStateOf(settings.isPinned(directory)) }
+                    IconButton(onClick = {
+                        settings.togglePinnedFolder(directory)
+                        starred = settings.isPinned(directory)
+                    }) {
+                        Image(
+                            painter = painterResource(if (starred) Res.drawable.star_filled else Res.drawable.star),
+                            contentDescription = if (starred) "Unstar" else "Star",
+                            modifier = Modifier.size(24.dp),
+                        )
+                    }
+                },
+            )
         },
     ) { padding ->
         when {

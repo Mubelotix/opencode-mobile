@@ -38,6 +38,7 @@ import opencodeapp.shared.generated.resources.Res
 import opencodeapp.shared.generated.resources.folder
 import opencodeapp.shared.generated.resources.file
 import opencodeapp.shared.generated.resources.star
+import opencodeapp.shared.generated.resources.star_filled
 import org.jetbrains.compose.resources.painterResource
 import page.dera.opencode.api.FsEntry
 import page.dera.opencode.api.OpencodeApi
@@ -161,50 +162,6 @@ fun FileExplorerScreen(
                     val list = entries
                     if (list != null) {
                         LazyColumn(modifier = Modifier.fillMaxSize()) {
-                            if (pinnedFolders.isNotEmpty() && parentPath == null) {
-                                item(key = "pinned_header") {
-                                    Text(
-                                        text = "Starred",
-                                        style = MaterialTheme.typography.titleSmall,
-                                        color = MaterialTheme.colorScheme.primary,
-                                        modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 4.dp),
-                                    )
-                                }
-                                items(pinnedFolders, key = { "pinned_$it" }) { path ->
-                                    Row(
-                                        modifier = Modifier
-                                            .fillMaxWidth()
-                                            .clickable { loadDirectory(path) }
-                                            .padding(horizontal = 16.dp, vertical = 4.dp),
-                                        verticalAlignment = Alignment.CenterVertically,
-                                    ) {
-                                        Image(
-                                            painter = painterResource(Res.drawable.star),
-                                            contentDescription = null,
-                                            modifier = Modifier.size(18.dp),
-                                        )
-                                        Spacer(modifier = Modifier.width(12.dp))
-                                        Text(
-                                            text = path,
-                                            style = MaterialTheme.typography.bodyLarge,
-                                            maxLines = 1,
-                                            overflow = TextOverflow.Ellipsis,
-                                            modifier = Modifier.weight(1f),
-                                        )
-                                        Image(
-                                                painter = painterResource(Res.drawable.star),
-                                                contentDescription = "Unstar",
-                                                modifier = Modifier.size(20.dp).clickable {
-                                                    settings.togglePinnedFolder(path)
-                                                    pinnedFolders = settings.pinnedFolders
-                                                },
-                                            )
-                                    }
-                                }
-                                item(key = "pinned_spacer") {
-                                    Spacer(modifier = Modifier.height(12.dp))
-                                }
-                            }
                             if (parentPath != null) {
                                 item(key = "parent") {
                                     Row(
@@ -243,15 +200,15 @@ fun FileExplorerScreen(
                                         )
                                     }
                                     if (entry.isDirectory) {
+                                        val filled = pinnedFolders.contains(fullPath)
                                         Image(
-                                            painter = painterResource(Res.drawable.star),
-                                            contentDescription = if (settings.isPinned(fullPath)) "Unstar" else "Star",
+                                            painter = painterResource(if (filled) Res.drawable.star_filled else Res.drawable.star),
+                                            contentDescription = if (filled) "Unstar" else "Star",
                                             modifier = Modifier.size(20.dp).clickable {
                                                 settings.togglePinnedFolder(fullPath)
                                                 pinnedFolders = settings.pinnedFolders
                                             },
-                                            alpha = if (settings.isPinned(fullPath)) 1f else 0.3f,
-                                        )
+                                            )
                                     }
                                 }
                             }

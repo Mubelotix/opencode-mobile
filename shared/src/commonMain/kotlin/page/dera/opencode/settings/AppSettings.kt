@@ -19,6 +19,24 @@ class AppSettings {
             else settings.remove(KEY_SERVER_PASSWORD)
         }
 
+    var pinnedFolders: List<String>
+        get() {
+            val raw = settings.getStringOrNull(KEY_PINNED_FOLDERS) ?: return emptyList()
+            return raw.split(",").filter { it.isNotBlank() }
+        }
+        set(value) {
+            if (value.isEmpty()) settings.remove(KEY_PINNED_FOLDERS)
+            else settings.putString(KEY_PINNED_FOLDERS, value.joinToString(","))
+        }
+
+    fun togglePinnedFolder(path: String) {
+        val current = pinnedFolders.toMutableList()
+        if (current.contains(path)) current.remove(path) else current.add(path)
+        pinnedFolders = current
+    }
+
+    fun isPinned(path: String): Boolean = pinnedFolders.contains(path)
+
     val isConfigured: Boolean
         get() = !serverUrl.isNullOrBlank()
 
@@ -30,5 +48,6 @@ class AppSettings {
     companion object {
         private const val KEY_SERVER_URL = "server_url"
         private const val KEY_SERVER_PASSWORD = "server_password"
+        private const val KEY_PINNED_FOLDERS = "pinned_folders"
     }
 }
