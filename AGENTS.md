@@ -11,6 +11,29 @@
 ./gradlew :androidApp:assembleDebug # android debug APK
 ```
 
+## Deploy (Android)
+```bash
+# Full pipeline: build → install → launch
+./gradlew :androidApp:assembleDebug && adb install -r androidApp/build/outputs/apk/debug/androidApp-debug.apk && adb shell am start -n page.dera.opencode/.MainActivity
+
+# Install only (APK already built)
+adb install -r androidApp/build/outputs/apk/debug/androidApp-debug.apk
+
+# Launch only (already installed)
+adb shell am start -n page.dera.opencode/.MainActivity
+
+# Read logs
+adb logcat -s System.out | grep OC_DBG
+```
+
+## ADB device setup
+```bash
+adb devices -l                    # verify connected
+# WiFi pairing (Android 11+): Developer options → Wireless debugging → pair/connect
+adb pair <ip>:<pairing-port> <code>
+adb connect <ip>:<connect-port>
+```
+
 ## OpenCode reference
 Clone for context when implementing opencode client behavior:
 ```bash
