@@ -37,6 +37,8 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import kotlin.time.Clock
+import kotlin.time.Instant
 import kotlinx.coroutines.launch
 import page.dera.opencode.api.OpencodeApi
 import page.dera.opencode.api.SessionInfo
@@ -296,7 +298,7 @@ private fun buildSubtitle(session: SessionInfo): String? {
 
 private fun relativeTime(epochMillis: Long): String? {
     if (epochMillis <= 0) return null
-    val now = kotlinx.datetime.Clock.System.now().toEpochMilliseconds()
+    val now = Clock.System.now().toEpochMilliseconds()
     val diff = now - epochMillis
     val seconds = diff / 1000
     val minutes = seconds / 60
