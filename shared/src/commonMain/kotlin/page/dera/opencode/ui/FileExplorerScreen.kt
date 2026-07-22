@@ -17,7 +17,6 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
-import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Scaffold
@@ -36,18 +35,19 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import opencodeapp.shared.generated.resources.Res
-import opencodeapp.shared.generated.resources.chevron_right
-import opencodeapp.shared.generated.resources.file
 import opencodeapp.shared.generated.resources.folder
+import opencodeapp.shared.generated.resources.file
 import opencodeapp.shared.generated.resources.star
 import org.jetbrains.compose.resources.painterResource
 import page.dera.opencode.api.FsEntry
 import page.dera.opencode.api.OpencodeApi
+import page.dera.opencode.settings.AppSettings
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun FileExplorerScreen(
     api: OpencodeApi,
+    settings: AppSettings,
     initialDirectory: String = "/home",
     onOpenProject: (directory: String) -> Unit,
 ) {
@@ -57,6 +57,36 @@ fun FileExplorerScreen(
     var isLoading by remember { mutableStateOf(false) }
     var pathInput by remember { mutableStateOf(currentPath) }
     var showPathInput by remember { mutableStateOf(false) }
+    var pinnedFolders by remember { mutableStateOf(settings.pinnedFolders) }
+    val pathStack = remember { mutableListOf(initialDirectory) }
+    var stackPos by remember { mutableStateOf(0) }
+
+    fun navigateTo(path: String) {
+        while (pathStack.size > stackPos + 1) pathStack.removeLast()
+        pathStack.add(path)
+        stackPos = pathStack.lastIndex
+        currentPath = path
+        showPathInput = false
+        isLoading = true
+        errorMessage = null
+        entries = null
+    }
+
+    fun loadDirectory(path: String) {
+        navigateTo(path)
+    }
+
+    fun goBack(): Boolean {
+        if (stackPos <= 0) return false
+        stackPos--
+        val path = pathStack[stackPos]
+        currentPath = path
+        showPathInput = false
+        isLoading = true
+        errorMessage = null
+        entries = null
+        return true
+    }
 
     val parentPath = currentPath.trimEnd('/').let { path ->
         if (path == "/" || path.isEmpty()) null
@@ -64,16 +94,7 @@ fun FileExplorerScreen(
     }
 
     BackHandler {
-        val p = parentPath
-        if (p != null) { currentPath = p; isLoading = true; errorMessage = null; entries = null; pathInput = p }
-    }
-
-    fun loadDirectory(path: String) {
-        currentPath = path
-        showPathInput = false
-        isLoading = true
-        errorMessage = null
-        entries = null
+        goBack()
     }
 
     LaunchedEffect(currentPath) {
@@ -86,11 +107,6 @@ fun FileExplorerScreen(
             onFailure = { errorMessage = it.message ?: "Failed to list directory" },
         )
         isLoading = false
-    }
-
-    val parentPath = currentPath.trimEnd('/').let { path ->
-        if (path == "/" || path.isEmpty()) null
-        else path.substringBeforeLast('/', "").ifEmpty { "/" }
     }
 
     Scaffold(
@@ -114,28 +130,13 @@ fun FileExplorerScreen(
                         )
                     }
                 },
-                actions = {
-                    TextButton(onClick = {
-                        if (showPathInput) {
-                            loadDirectory(pathInput)
-                        } else {
-                            pathInput = currentPath
-                            showPathInput = true
-                        }
-                    }) {
-                        Text(if (showPathInput) "Go" else "Edit")
-                    }
-                },
             )
         },
     ) { padding ->
         Box(modifier = Modifier.fillMaxSize().padding(padding)) {
             when {
                 isLoading -> {
-                    Box(
-                        modifier = Modifier.fillMaxSize(),
-                        contentAlignment = Alignment.Center,
-                    ) {
+                    Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
                         CircularProgressIndicator()
                     }
                 }
@@ -160,46 +161,99 @@ fun FileExplorerScreen(
                     val list = entries
                     if (list != null) {
                         LazyColumn(modifier = Modifier.fillMaxSize()) {
+                            if (pinnedFolders.isNotEmpty() && parentPath == null) {
+                                item(key = "pinned_header") {
+                                    Text(
+                                        text = "Starred",
+                                        style = MaterialTheme.typography.titleSmall,
+                                        color = MaterialTheme.colorScheme.primary,
+                                        modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 4.dp),
+                                    )
+                                }
+                                items(pinnedFolders, key = { "pinned_$it" }) { path ->
+                                    Row(
+                                        modifier = Modifier
+                                            .fillMaxWidth()
+                                            .clickable { loadDirectory(path) }
+                                            .padding(horizontal = 16.dp, vertical = 4.dp),
+                                        verticalAlignment = Alignment.CenterVertically,
+                                    ) {
+                                        Image(
+                                            painter = painterResource(Res.drawable.star),
+                                            contentDescription = null,
+                                            modifier = Modifier.size(18.dp),
+                                        )
+                                        Spacer(modifier = Modifier.width(12.dp))
+                                        Text(
+                                            text = path,
+                                            style = MaterialTheme.typography.bodyLarge,
+                                            maxLines = 1,
+                                            overflow = TextOverflow.Ellipsis,
+                                            modifier = Modifier.weight(1f),
+                                        )
+                                        Image(
+                                                painter = painterResource(Res.drawable.star),
+                                                contentDescription = "Unstar",
+                                                modifier = Modifier.size(20.dp).clickable {
+                                                    settings.togglePinnedFolder(path)
+                                                    pinnedFolders = settings.pinnedFolders
+                                                },
+                                            )
+                                    }
+                                }
+                                item(key = "pinned_spacer") {
+                                    Spacer(modifier = Modifier.height(12.dp))
+                                }
+                            }
                             if (parentPath != null) {
                                 item(key = "parent") {
                                     Row(
                                         modifier = Modifier
                                             .fillMaxWidth()
-                                            .clickable { loadDirectory(parentPath) }
-                                            .padding(horizontal = 16.dp, vertical = 12.dp),
+                                            .clickable { goBack() }
+                                            .padding(horizontal = 16.dp, vertical = 4.dp),
                                     ) {
                                         Text("..", color = MaterialTheme.colorScheme.primary)
                                     }
-                                    HorizontalDivider()
                                 }
                             }
                             items(list, key = { it.path }) { entry ->
                                 val fullPath = if (currentPath == "/") "/${entry.name}" else "$currentPath/${entry.name}"
                                 Row(
-                                    modifier = Modifier
-                                        .fillMaxWidth()
-                                        .clickable {
-                                            if (entry.isDirectory) loadDirectory(fullPath)
-                                        }
-                                        .padding(horizontal = 16.dp, vertical = 10.dp),
+                                    modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 2.dp),
                                     verticalAlignment = Alignment.CenterVertically,
                                 ) {
-                                    val icon = if (entry.isDirectory) Res.drawable.folder else Res.drawable.file
-                                    Image(
-                                        painter = painterResource(icon),
-                                        contentDescription = null,
-                                        modifier = Modifier.size(20.dp),
-                                    )
-                                    Spacer(modifier = Modifier.width(8.dp))
-                                    Text(
-                                        text = entry.name,
-                                        style = MaterialTheme.typography.bodyLarge,
-                                        maxLines = 1,
-                                        overflow = TextOverflow.Ellipsis,
-                                        modifier = Modifier.weight(1f),
-                                    )
+                                    Row(
+                                        modifier = Modifier.weight(1f).clickable {
+                                            if (entry.isDirectory) loadDirectory(fullPath)
+                                        }.padding(vertical = 4.dp),
+                                        verticalAlignment = Alignment.CenterVertically,
+                                    ) {
+                                        Image(
+                                            painter = painterResource(if (entry.isDirectory) Res.drawable.folder else Res.drawable.file),
+                                            contentDescription = null,
+                                            modifier = Modifier.size(20.dp),
+                                        )
+                                        Spacer(modifier = Modifier.width(8.dp))
+                                        Text(
+                                            text = entry.name,
+                                            style = MaterialTheme.typography.bodyLarge,
+                                            maxLines = 1,
+                                            overflow = TextOverflow.Ellipsis,
+                                        )
+                                    }
+                                    if (entry.isDirectory) {
+                                        Image(
+                                            painter = painterResource(Res.drawable.star),
+                                            contentDescription = if (settings.isPinned(fullPath)) "Unstar" else "Star",
+                                            modifier = Modifier.size(20.dp).clickable {
+                                                settings.togglePinnedFolder(fullPath)
+                                                pinnedFolders = settings.pinnedFolders
+                                            },
+                                            alpha = if (settings.isPinned(fullPath)) 1f else 0.3f,
+                                        )
+                                    }
                                 }
-                                HorizontalDivider(modifier = Modifier.padding(start = 16.dp))
                             }
                             item(key = "open_button") {
                                 Spacer(modifier = Modifier.height(24.dp))
