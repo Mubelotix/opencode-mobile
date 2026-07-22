@@ -28,7 +28,21 @@ Lucide icon set — 24x24, stroke-based, ISC license. 1600+ icons.
    - Outline: star.xml (stroke only, default)
    - Filled: create star_filled.xml by copying and changing `android:strokeColor` → `android:fillColor`, removing `android:strokeWidth`/`strokeLineCap`/`strokeLineJoin`, and removing `android:fillColor="#00000000"`.
    - Fix `@color/black` on BOTH files independently.
-4. Use in Compose:
+5. **Kotlin compiler workaround (REQUIRED for new icons):** The compose-resources plugin generates `internal` extension properties on `Res.drawable` (anonymous object type). Kotlin compiler cannot resolve new `internal` extensions on anonymous types from other packages. Icons that shipped with the initial build work, but any NEW icon fails with "Unresolved reference". Fix:
+   - **IMPORTANT**: After downloading a new XML, ALWAYS add a public accessor in `shared/src/commonMain/kotlin/opencodeapp/shared/generated/resources/PublicIcons.kt`:
+     ```kotlin
+     package opencodeapp.shared.generated.resources
+
+     import org.jetbrains.compose.resources.DrawableResource
+
+     val searchIcon: DrawableResource get() = Res.drawable.search
+     ```
+   - Use the public accessor in code instead of `Res.drawable.<name>`:
+     ```kotlin
+     import opencodeapp.shared.generated.resources.searchIcon
+     Image(painter = painterResource(searchIcon), ...)
+     ```
+6. Use in Compose:
    ```kotlin
    import opencodeapp.shared.generated.resources.Res
    import opencodeapp.shared.generated.resources.<icon_name>
