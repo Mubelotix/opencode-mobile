@@ -55,6 +55,8 @@ import page.dera.opencode.api.OpencodeApi
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
+import com.mikepenz.markdown.m3.Markdown
+import com.mikepenz.markdown.model.rememberMarkdownState
 import opencodeapp.shared.generated.resources.Res
 import opencodeapp.shared.generated.resources.clock
 import opencodeapp.shared.generated.resources.file
@@ -174,7 +176,7 @@ fun SessionDetailScreen(api: OpencodeApi, sessionId: String, sessionTitle: Strin
 
 @Composable private fun PartContent(part: LegacyPart, streamingText: Map<String, String>) {
     when (part.type) {
-        "text" -> { val t = streamingText["${part.messageID}:${part.id}"] ?: (part.text ?: ""); Box(Modifier.widthIn(max=360.dp).clip(RoundedCornerShape(4.dp,16.dp,16.dp,16.dp)).background(MaterialTheme.colorScheme.surfaceVariant).padding(12.dp)) { Text(t, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant) } }
+        "text" -> { val t = (streamingText["${part.messageID}:${part.id}"] ?: (part.text ?: "")).trimEnd(); val md = rememberMarkdownState(t, retainState = true); Box(Modifier.widthIn(max=360.dp).clip(RoundedCornerShape(4.dp,16.dp,16.dp,16.dp)).background(MaterialTheme.colorScheme.surfaceVariant).padding(12.dp)) { Markdown(md) } }
         "reasoning" -> { val t = streamingText["${part.messageID}:${part.id}"] ?: (part.text ?: ""); Box(Modifier.fillMaxWidth().padding(vertical=2.dp).clip(RoundedCornerShape(8.dp)).background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha=.5f)).padding(8.dp)) { Column { Text("Thinking", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.tertiary); Spacer(Modifier.height(4.dp)); Text(t, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant) } } }
         "tool" -> ToolPart(part)
         "compaction" -> Box(Modifier.fillMaxWidth(), contentAlignment = Alignment.Center) { Text("Context compacted", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.outline, modifier = Modifier.padding(vertical=4.dp)) }
