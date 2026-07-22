@@ -122,7 +122,10 @@ fun SessionDetailScreen(api: OpencodeApi, sessionId: String, sessionTitle: Strin
                     "session.status" -> { isRunning = true }
                     "session.idle" -> {
                         isRunning = false
-                        api.getSessionMessages(sessionId).onSuccess { messages.clear(); messages.addAll(it) }
+                        api.getSessionMessages(sessionId).onSuccess { fresh ->
+                            messages.removeAll { !it.info.id.startsWith("evt_") }
+                            fresh.forEach { f -> if (messages.none { m -> m.info.id == f.info.id }) messages.add(f) }
+                        }
                     }
                     "permission.asked" -> {
                         println("OC_DBG: permission.asked props=$props")
@@ -135,7 +138,7 @@ fun SessionDetailScreen(api: OpencodeApi, sessionId: String, sessionTitle: Strin
                             PermissionRequest(
                                 id = id, sessionID = sid, permission = permission,
                                 patterns = patterns, always = always,
-                                tool = PermissionToolRef(
+                                tool = page.dera.opencode.api.PermissionToolRef(
                                     messageID = it["messageID"]?.jsonPrimitive?.content ?: "",
                                     callID = it["callID"]?.jsonPrimitive?.content ?: ""
                                 )
@@ -147,6 +150,17 @@ fun SessionDetailScreen(api: OpencodeApi, sessionId: String, sessionTitle: Strin
                         val rid = props["requestID"]?.jsonPrimitive?.content ?: return@collect
                         println("OC_DBG: permission.replied requestID=$rid")
                         permissionRequests.removeAll { it.id == rid }
+                    }
+                    else -> {
+                        val rawId = "evt_${event.payload?.type ?: "unknown"}_${kotlin.random.Random.nextLong().toString(36)}"
+                        val display = event.payload?.properties?.toString() ?: "{}"
+                        println("OC_DBG: unhandled event type=${event.payload?.type} props=$display")
+                        if (messages.none { it.info.id == rawId }) {
+                            messages.add(LegacyWithParts(
+                                LegacyInfo(id = rawId, sessionID = sessionId, role = "system"),
+                                listOf(LegacyPart(id = rawId, sessionID = sessionId, messageID = rawId, type = "text", text = "[${event.payload?.type ?: "unknown"}] $display"))
+                            ))
+                        }
                     }
                 }
             }
@@ -254,7 +268,7 @@ fun SessionDetailScreen(api: OpencodeApi, sessionId: String, sessionTitle: Strin
     when (msg.info.role) {
         "user" -> Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) { Column(Modifier.widthIn(max = 320.dp).clip(RoundedCornerShape(16.dp, 4.dp, 16.dp, 16.dp)).background(MaterialTheme.colorScheme.primaryContainer).padding(12.dp)) { Text(parts.filter { it.type=="text" }.joinToString("\n"){it.text ?: ""}.ifEmpty{"Sent a message"}, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onPrimaryContainer) } }
         "assistant" -> AssistantCard(msg.info, parts, streamingText)
-        else -> Box(Modifier.fillMaxWidth(), contentAlignment = Alignment.Center) { Text("System message", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.outline, modifier = Modifier.padding(vertical = 4.dp)) }
+        else -> Box(Modifier.fillMaxWidth(), contentAlignment = Alignment.Center) { Column(horizontalAlignment = Alignment.CenterHorizontally, modifier = Modifier.padding(vertical = 4.dp)) { Text("System message", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.outline); parts.filter { it.type == "text" && !it.text.isNullOrBlank() }.forEach { part -> Text(part.text!!, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.outline, modifier = Modifier.padding(top = 2.dp)) } } }
     }
 }
 
