@@ -62,6 +62,7 @@ import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
 import com.mikepenz.markdown.m3.Markdown
 import com.mikepenz.markdown.model.rememberMarkdownState
+import opencodeapp.shared.generated.resources.searchIcon
 import opencodeapp.shared.generated.resources.Res
 import opencodeapp.shared.generated.resources.clock
 import opencodeapp.shared.generated.resources.file
@@ -292,10 +293,24 @@ fun SessionDetailScreen(api: OpencodeApi, sessionId: String, sessionTitle: Strin
 @Composable private fun ToolPart(part: LegacyPart) {
     val tc = when(part.state?.status) { "pending"->MaterialTheme.colorScheme.outline; "running"->MaterialTheme.colorScheme.tertiary; "completed"->MaterialTheme.colorScheme.primary; "error"->MaterialTheme.colorScheme.error; else->MaterialTheme.colorScheme.outline }
     val label = toolLabel(part)
+    val matchSuffix = matchCount(part)
     if (part.tool == "bash") Box(Modifier.fillMaxWidth().padding(vertical=2.dp).clip(RoundedCornerShape(8.dp)).background(Color(0xFF1E1E2E)).padding(10.dp)) {
         Column { Row(verticalAlignment = Alignment.CenterVertically) { Image(painterResource(Res.drawable.terminal), null, Modifier.size(14.dp)); Spacer(Modifier.width(6.dp)); Text(label, style = MaterialTheme.typography.bodySmall, fontFamily = FontFamily.Monospace, color = Color(0xFFCDD6F4), maxLines=1); Spacer(Modifier.weight(1f)); Box(Modifier.size(6.dp).clip(CircleShape).background(tc)) }
             if (part.state is LegacyToolState.Running) { Spacer(Modifier.height(4.dp)); Row(verticalAlignment = Alignment.CenterVertically) { CircularProgressIndicator(Modifier.size(12.dp), strokeWidth=1.5.dp); Spacer(Modifier.width(8.dp)); Text("Running...", style = MaterialTheme.typography.bodySmall, color = Color(0xFFA6ADC8)) } } }
-    } else Row(Modifier.padding(vertical=2.dp), verticalAlignment = Alignment.CenterVertically) { Box(Modifier.size(6.dp).clip(CircleShape).background(tc)); Spacer(Modifier.width(6.dp)); Image(painterResource(Res.drawable.file), null, Modifier.size(14.dp)); Spacer(Modifier.width(4.dp)); Text(label, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines=1); Spacer(Modifier.weight(1f)); Text(part.state?.status ?: "", style = MaterialTheme.typography.labelSmall, color = tc.copy(alpha=.7f)) }
+    } else {
+        val icon = when(part.tool) { "glob","grep" -> searchIcon; else -> Res.drawable.file }
+        Row(Modifier.padding(vertical=2.dp), verticalAlignment = Alignment.CenterVertically) { Box(Modifier.size(6.dp).clip(CircleShape).background(tc)); Spacer(Modifier.width(6.dp)); Image(painterResource(icon), null, Modifier.size(14.dp)); Spacer(Modifier.width(4.dp)); Text(label, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines=1); if (matchSuffix != null) { Text(" $matchSuffix", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.outline, maxLines=1) }; Spacer(Modifier.weight(1f)); Text(part.state?.status ?: "", style = MaterialTheme.typography.labelSmall, color = tc.copy(alpha=.7f)) }
+    }
+}
+
+private fun matchCount(part: LegacyPart): String? {
+    if (part.tool !in setOf("glob", "grep")) return null
+    val output = when (val s = part.state) {
+        is LegacyToolState.Completed -> s.output
+        else -> return null
+    }
+    val count = output.lines().count { it.isNotBlank() }
+    return if (count > 0) "($count matches)" else null
 }
 
 private fun toolLabel(part: LegacyPart): String {
