@@ -58,6 +58,16 @@ fun FileExplorerScreen(
     var pathInput by remember { mutableStateOf(currentPath) }
     var showPathInput by remember { mutableStateOf(false) }
 
+    val parentPath = currentPath.trimEnd('/').let { path ->
+        if (path == "/" || path.isEmpty()) null
+        else path.substringBeforeLast('/', "").ifEmpty { "/" }
+    }
+
+    BackHandler {
+        val p = parentPath
+        if (p != null) { currentPath = p; isLoading = true; errorMessage = null; entries = null; pathInput = p }
+    }
+
     fun loadDirectory(path: String) {
         currentPath = path
         showPathInput = false

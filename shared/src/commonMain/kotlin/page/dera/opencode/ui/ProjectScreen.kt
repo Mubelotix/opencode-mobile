@@ -14,7 +14,16 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.material3.*
+import androidx.compose.material3.Card
+import androidx.compose.material3.CardDefaults
+import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedButton
+import androidx.compose.material3.Scaffold
+import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
+import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -61,38 +70,7 @@ fun ProjectScreen(api: OpencodeApi, directory: String, name: String, onBack: () 
 
     Scaffold(
         topBar = {
-            TopAppBar(
-                title = { Text(name) },
-            )
-        },
-        floatingActionButton = {
-            FloatingActionButton(
-                onClick = {
-                    if (!isCreating) {
-                        isCreating = true
-                        scope.launch {
-                            val result = api.createSession(directory)
-                            result.fold(
-                                onSuccess = { session ->
-                                    onSessionClick(session)
-                                },
-                                onFailure = { errorMessage = it.message ?: "Failed to create session" },
-                            )
-                            isCreating = false
-                        }
-                    }
-                },
-            ) {
-                if (isCreating) {
-                    CircularProgressIndicator(
-                        modifier = Modifier.size(24.dp),
-                        color = MaterialTheme.colorScheme.onPrimaryContainer,
-                        strokeWidth = 2.dp,
-                    )
-                } else {
-                    Text("+")
-                }
-            }
+            TopAppBar(title = { Text(name) })
         },
     ) { padding ->
         when {
@@ -112,7 +90,7 @@ fun ProjectScreen(api: OpencodeApi, directory: String, name: String, onBack: () 
                             errorMessage = null
                             isLoading = true
                             scope.launch {
-        val result = api.listSessions(directory = directory)
+                                val result = api.listSessions(directory = directory)
                                 result.fold(
                                     onSuccess = { handlePage(it, append = false) },
                                     onFailure = { errorMessage = it.message ?: "Failed to load sessions" },
@@ -133,67 +111,94 @@ fun ProjectScreen(api: OpencodeApi, directory: String, name: String, onBack: () 
                     CircularProgressIndicator()
                 }
             }
-            sessions.isEmpty() -> {
-                Box(
-                    modifier = Modifier.fillMaxSize().padding(padding),
-                    contentAlignment = Alignment.Center,
-                ) {
-                    Text(
-                        text = "No sessions",
-                        style = MaterialTheme.typography.bodyLarge,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
-                }
-            }
             else -> {
                 val grouped = groupByWorkspace(sessions)
-                LazyColumn(
-                    modifier = Modifier.fillMaxSize().padding(padding),
-                ) {
-                    grouped.forEach { (workspaceName, workspaceSessions) ->
-                        item(key = "header_$workspaceName") {
-                            Text(
-                                text = workspaceName,
-                                style = MaterialTheme.typography.titleSmall,
-                                color = MaterialTheme.colorScheme.primary,
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .padding(horizontal = 16.dp, vertical = 10.dp),
-                            )
-                        }
-                        items(workspaceSessions, key = { it.id }) { session ->
-                            SessionCard(session = session, onClick = { onSessionClick(session) })
-                        }
-                        item(key = "spacer_$workspaceName") {
-                            Spacer(modifier = Modifier.height(12.dp))
-                        }
-                    }
-                    if (hasMore) {
-                        item(key = "load_more") {
+                LazyColumn(modifier = Modifier.fillMaxSize().padding(padding)) {
+                    item(key = "new_session") {
+                        Card(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(horizontal = 16.dp, vertical = 4.dp)
+                                .clickable {
+                                    if (!isCreating) {
+                                        isCreating = true
+                                        scope.launch {
+                                            val result = api.createSession(directory)
+                                            result.fold(
+                                                onSuccess = { onSessionClick(it) },
+                                                onFailure = { errorMessage = it.message ?: "Failed to create session" },
+                                            )
+                                            isCreating = false
+                                        }
+                                    }
+                                },
+                            shape = RoundedCornerShape(12.dp),
+                            colors = CardDefaults.cardColors(
+                                containerColor = MaterialTheme.colorScheme.primaryContainer,
+                            ),
+                        ) {
                             Box(
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .padding(16.dp),
+                                modifier = Modifier.fillMaxWidth().padding(16.dp),
                                 contentAlignment = Alignment.Center,
                             ) {
-                                if (isLoadingMore) {
-                                    CircularProgressIndicator(modifier = Modifier.size(24.dp))
+                                if (isCreating) {
+                                    CircularProgressIndicator(
+                                        modifier = Modifier.size(24.dp),
+                                        strokeWidth = 2.dp,
+                                    )
                                 } else {
-                                    OutlinedButton(onClick = {
-                                        isLoadingMore = true
-                                        scope.launch {
-                                            val result = api.listSessions(
-                                                directory = directory,
-                                                cursor = nextCursor,
-                                            )
-                                            result.fold(
-                                                onSuccess = { handlePage(it, append = true) },
-                                                onFailure = { errorMessage = it.message ?: "Failed to load more" },
-                                            )
-                                            isLoadingMore = false
+                                    Text(
+                                        text = "+ New session",
+                                        style = MaterialTheme.typography.bodyLarge,
+                                    )
+                                }
+                            }
+                        }
+                    }
+                    if (sessions.isNotEmpty()) {
+                        grouped.forEach { (workspaceName, workspaceSessions) ->
+                            item(key = "header_$workspaceName") {
+                                Text(
+                                    text = workspaceName,
+                                    style = MaterialTheme.typography.titleSmall,
+                                    color = MaterialTheme.colorScheme.primary,
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .padding(horizontal = 16.dp, vertical = 10.dp),
+                                )
+                            }
+                            items(workspaceSessions, key = { it.id }) { session ->
+                                SessionCard(session = session, onClick = { onSessionClick(session) })
+                            }
+                            item(key = "spacer_$workspaceName") {
+                                Spacer(modifier = Modifier.height(12.dp))
+                            }
+                        }
+                        if (hasMore) {
+                            item(key = "load_more") {
+                                Box(
+                                    modifier = Modifier.fillMaxWidth().padding(16.dp),
+                                    contentAlignment = Alignment.Center,
+                                ) {
+                                    if (isLoadingMore) {
+                                        CircularProgressIndicator(modifier = Modifier.size(24.dp))
+                                    } else {
+                                        OutlinedButton(onClick = {
+                                            isLoadingMore = true
+                                            scope.launch {
+                                                val result = api.listSessions(
+                                                    directory = directory,
+                                                    cursor = nextCursor,
+                                                )
+                                                result.fold(
+                                                    onSuccess = { handlePage(it, append = true) },
+                                                    onFailure = { errorMessage = it.message ?: "Failed to load more" },
+                                                )
+                                                isLoadingMore = false
+                                            }
+                                        }) {
+                                            Text("Load more")
                                         }
-                                    }) {
-                                        Text("Load more")
                                     }
                                 }
                             }
@@ -218,9 +223,7 @@ private fun SessionCard(session: SessionInfo, onClick: () -> Unit) {
         ),
     ) {
         Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(16.dp),
+            modifier = Modifier.fillMaxWidth().padding(16.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
             Column(modifier = Modifier.weight(1f)) {
@@ -254,18 +257,14 @@ private fun SessionCard(session: SessionInfo, onClick: () -> Unit) {
 
 private fun buildSubtitle(session: SessionInfo): String? {
     val parts = mutableListOf<String>()
-
     val relative = relativeTime(session.time.updated)
     if (relative != null) parts.add(relative)
-
     val totalTokens = (session.tokens?.input ?: 0) + (session.tokens?.output ?: 0)
     if (totalTokens > 0) parts.add(formatTokens(totalTokens))
-
     if (parts.isEmpty()) {
         val dir = session.location.directory.trimEnd('/').split('/')
         if (dir.isNotEmpty()) parts.add(dir.takeLast(2).joinToString("/"))
     }
-
     return parts.joinToString("  ·  ").ifBlank { null }
 }
 
