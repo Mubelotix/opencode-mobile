@@ -998,11 +998,8 @@ private fun toolLabel(part: LegacyPart, projectRoot: String): String {
             if (host != null && host.length > 40) host.take(40) + "..." else host
         } ?: "webfetch"
         "invalid" -> {
-            val tool = obj["tool"]?.toString()?.removeSurrounding("\"") ?: ""
             val error = obj["error"]?.toString()?.removeSurrounding("\"") ?: ""
-            if (tool.isNotBlank() && error.isNotBlank()) "Invalid $tool: $error"
-            else if (tool.isNotBlank()) "Invalid $tool"
-            else "Invalid tool call"
+            error.ifBlank { "Invalid tool call" }
         }
         else -> part.tool ?: "tool"
     }
