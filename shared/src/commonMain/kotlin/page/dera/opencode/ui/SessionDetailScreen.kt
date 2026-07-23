@@ -363,12 +363,12 @@ private fun SendingIndicator() {
     val startTime = startTimes[key]
     if (!isStreaming && startTime != null && !finalDurations.containsKey(key)) {
         val totalMs = Clock.System.now().toEpochMilliseconds() - startTime
-        finalDurations[key] = if (totalMs < 1000) "Thought in ${totalMs}ms"
-        else "Thought in ${thinkingDurationSeconds(totalMs)}"
+        finalDurations[key] = if (totalMs < 1000) "Thought for ${totalMs}ms"
+        else "Thought for ${thinkingDurationSeconds(totalMs)}"
     }
     val headerText = if (isStreaming) {
         val elapsed = startTime?.let { Clock.System.now().toEpochMilliseconds() - it } ?: 0
-        if (elapsed < 1000) "${elapsed}ms" else thinkingDurationText(elapsed)
+        if (elapsed < 1000) "Thinking for ${elapsed}ms" else "Thinking for ${thinkingDurationText(elapsed)}s"
     } else finalDurations[key] ?: "Thought"
     Row(Modifier.fillMaxWidth().padding(vertical = 2.dp).clickable { expanded = !expanded }, verticalAlignment = Alignment.CenterVertically) {
         Image(painterResource(brainIcon), null, Modifier.size(14.dp))
