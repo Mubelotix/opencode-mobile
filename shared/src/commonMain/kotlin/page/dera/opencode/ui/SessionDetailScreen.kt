@@ -115,11 +115,13 @@ fun SessionDetailScreen(api: OpencodeApi, sessionId: String, sessionTitle: Strin
 
     LaunchedEffect(sessionId, directory) {
         try {
+            println("OC_DBG: SSE collect started session=$sessionId")
             api.streamGlobalEvents(directory).collect { event ->
                 val props = event.payload?.properties?.jsonObject ?: return@collect
                 val sid = props["sessionID"]?.jsonPrimitive?.content ?: return@collect
                 if (sid != sessionId) return@collect
-                when (event.payload?.type) {
+                val evType = event.payload?.type ?: "null"
+                when (evType) {
                     "message.part.delta" -> {
                         val k = "${props["messageID"]?.jsonPrimitive?.content}:${props["partID"]?.jsonPrimitive?.content}"
                         streamingText[k] = (streamingText[k] ?: "") + (props["delta"]?.jsonPrimitive?.content ?: "")
@@ -142,14 +144,16 @@ fun SessionDetailScreen(api: OpencodeApi, sessionId: String, sessionTitle: Strin
                         val infoJson = props["info"]?.jsonObject ?: return@collect
                         val info = try { Json { ignoreUnknownKeys = true; coerceInputValues = true }.decodeFromJsonElement(LegacyInfo.serializer(), infoJson) } catch (_: Exception) { return@collect }
                         val mi = messages.indexOfFirst { it.info.id == info.id }
-                        if (mi >= 0) messages[mi] = LegacyWithParts(info, messages[mi].parts) else messages.add(LegacyWithParts(info))
+                        if (mi >= 0) messages[mi] = LegacyWithParts(info, messages[mi].parts) else { println("OC_DBG: message.updated adding new role=${info.role} id=${info.id}"); messages.add(LegacyWithParts(info)) }
                     }
-                    "session.status" -> { isRunning = true }
+                    "session.status" -> { println("OC_DBG: session.status $sid"); isRunning = true }
                     "session.idle" -> {
+                        println("OC_DBG: session.idle $sid, msgs before=${messages.size}")
                         isRunning = false
                         api.getSessionMessages(sessionId).onSuccess { fresh ->
                             messages.removeAll { !it.info.id.startsWith("evt_") }
                             fresh.forEach { f -> if (messages.none { m -> m.info.id == f.info.id }) messages.add(f) }
+                            println("OC_DBG: session.idle done, msgs after=${messages.size}")
                         }
                     }
                     "session.updated" -> {

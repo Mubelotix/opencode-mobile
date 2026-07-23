@@ -13,6 +13,7 @@ import io.ktor.http.contentType
 import io.ktor.http.isSuccess
 import io.ktor.utils.io.readUTF8Line
 import kotlin.io.encoding.Base64
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.flow
 import kotlinx.serialization.Serializable
@@ -132,21 +133,30 @@ class OpencodeApi(
     }
 
     fun streamGlobalEvents(directory: String): Flow<GlobalEvent> = flow {
-        client.prepareGet("$serverUrl/global/event") {
-            authHeader()?.let { (k, v) -> header(k, v) }; url.parameters.append("directory", directory)
-        }.execute { response ->
-            val channel = response.bodyAsChannel()
-            var dataBuffer = ""
-            while (!channel.isClosedForRead) {
-                val line = channel.readUTF8Line() ?: break
-                when {
-                    line.startsWith("data: ") -> dataBuffer = line.removePrefix("data: ")
-                    line.isEmpty() && dataBuffer.isNotEmpty() -> {
-                        try { emit(json.decodeFromString<GlobalEvent>(dataBuffer)) } catch (_: Exception) { }
-                        dataBuffer = ""
+        while (true) {
+            println("OC_DBG: SSE connecting for dir=$directory")
+            try {
+                client.prepareGet("$serverUrl/global/event") {
+                    authHeader()?.let { (k, v) -> header(k, v) }; url.parameters.append("directory", directory)
+                }.execute { response ->
+                    val channel = response.bodyAsChannel()
+                    var dataBuffer = ""
+                    while (!channel.isClosedForRead) {
+                        val line = channel.readUTF8Line() ?: break
+                        when {
+                            line.startsWith("data: ") -> dataBuffer = line.removePrefix("data: ")
+                            line.isEmpty() && dataBuffer.isNotEmpty() -> {
+                                try { emit(json.decodeFromString<GlobalEvent>(dataBuffer)) } catch (_: Exception) { }
+                                dataBuffer = ""
+                            }
+                        }
                     }
                 }
+            } catch (e: Exception) {
+                println("OC_DBG: SSE error: ${e.message}")
             }
+            println("OC_DBG: SSE disconnected, reconnecting in 1s...")
+            delay(1000)
         }
     }
 
