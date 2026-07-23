@@ -87,7 +87,7 @@ import org.jetbrains.compose.resources.painterResource
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun SessionDetailScreen(api: OpencodeApi, sessionId: String, sessionTitle: String, directory: String, onBack: () -> Unit) {
+fun SessionDetailScreen(api: OpencodeApi, sessionId: String, sessionTitle: String, directory: String, projectRoot: String, onBack: () -> Unit) {
     val messages = remember { mutableStateListOf<LegacyWithParts>() }
     val listState = rememberLazyListState()
     var inputText by remember { mutableStateOf("") }
@@ -321,12 +321,12 @@ fun SessionDetailScreen(api: OpencodeApi, sessionId: String, sessionTitle: Strin
                     )
                 }
             }
-            permissionRequests.forEach { req -> PermissionPrompt(req, api, sessionId, directory) }
+            permissionRequests.forEach { req -> PermissionPrompt(req, api, sessionId, directory, projectRoot) }
             questionRequests.forEach { req -> QuestionPrompt(req, api, sessionId, directory) }
             if (messages.isEmpty() && !isLoading) Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) { Text(sessionTitle.ifEmpty { "Session" }, style = MaterialTheme.typography.headlineSmall) }
             else {
                 LazyColumn(state = listState, modifier = Modifier.fillMaxSize(), verticalArrangement = Arrangement.spacedBy(0.dp), contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = 12.dp, vertical = 8.dp)) {
-                    itemsIndexed(messages) { _, msg -> MessageCard(msg, streamingText, streamVersion) }
+                    itemsIndexed(messages) { _, msg -> MessageCard(msg, streamingText, streamVersion, projectRoot) }
                     if (isSending || isRunning) item { SendingIndicator() }
                 }
             }
@@ -379,7 +379,7 @@ private fun SendingIndicator() {
         Spacer(Modifier.width(4.dp))
         Text(headerText, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
     }
-    if (expanded) {
+    if (expanded && t.isNotBlank()) {
         Box(Modifier.fillMaxWidth().padding(vertical = 2.dp).clip(RoundedCornerShape(8.dp))
             .background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = .5f)).padding(8.dp)) {
             Text(t, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
@@ -403,14 +403,14 @@ private fun thinkingDurationSeconds(ms: Long): String {
            else "${whole}s"
 }
 
-@Composable private fun PermissionPrompt(req: PermissionRequest, api: OpencodeApi, sessionId: String, directory: String) {
+@Composable private fun PermissionPrompt(req: PermissionRequest, api: OpencodeApi, sessionId: String, directory: String, projectRoot: String) {
     val scope = rememberCoroutineScope()
     var replying by remember { mutableStateOf(false) }
     val label = when (req.permission) {
         "tool_execution" -> "Run tool: ${req.tool?.callID?.takeLast(40) ?: "unknown"}"
-        "read_file" -> "Read file: ${req.patterns.firstOrNull()?.substringAfterLast('/') ?: "unknown"}"
-        "write_file" -> "Write file: ${req.patterns.firstOrNull()?.substringAfterLast('/') ?: "unknown"}"
-        "edit_file" -> "Edit file: ${req.patterns.firstOrNull()?.substringAfterLast('/') ?: "unknown"}"
+        "read_file" -> "Read file: ${req.patterns.firstOrNull()?.let { relativePath(it, projectRoot) } ?: "unknown"}"
+        "write_file" -> "Write file: ${req.patterns.firstOrNull()?.let { relativePath(it, projectRoot) } ?: "unknown"}"
+        "edit_file" -> "Edit file: ${req.patterns.firstOrNull()?.let { relativePath(it, projectRoot) } ?: "unknown"}"
         else -> "${req.permission}: ${req.patterns.firstOrNull()?.takeLast(50) ?: "unknown"}"
     }
     Box(Modifier.fillMaxWidth().clip(RoundedCornerShape(12.dp)).background(MaterialTheme.colorScheme.secondaryContainer).padding(12.dp)) {
@@ -420,7 +420,7 @@ private fun thinkingDurationSeconds(ms: Long): String {
             Text(label, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSecondaryContainer)
             if (req.patterns.isNotEmpty()) {
                 Spacer(Modifier.height(2.dp))
-                Text(req.patterns.joinToString(", ") { it.takeLast(60) }, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSecondaryContainer.copy(alpha = .7f))
+                Text(req.patterns.joinToString(", ") { relativePath(it, projectRoot) }, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSecondaryContainer.copy(alpha = .7f))
             }
             Spacer(Modifier.height(8.dp))
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -611,7 +611,7 @@ private fun QuestionPrompt(req: QuestionRequest, api: OpencodeApi, sessionId: St
 }
 
 @Composable
-private fun MessageCard(msg: LegacyWithParts, streamingText: Map<String, String>, streamVersion: Int) {
+private fun MessageCard(msg: LegacyWithParts, streamingText: Map<String, String>, streamVersion: Int, projectRoot: String) {
     streamVersion
     val parts = msg.parts.filter { it.type !in listOf("step-start", "step-finish", "snapshot", "patch") }
     when (msg.info.role) {
@@ -634,7 +634,7 @@ private fun MessageCard(msg: LegacyWithParts, streamingText: Map<String, String>
                 )
             }
         }
-        "assistant" -> AssistantCard(msg.info, parts, streamingText, streamVersion)
+        "assistant" -> AssistantCard(msg.info, parts, streamingText, streamVersion, projectRoot)
         else -> Box(
             Modifier.fillMaxWidth().padding(vertical = 2.dp),
             contentAlignment = Alignment.Center,
@@ -662,7 +662,7 @@ private fun MessageCard(msg: LegacyWithParts, streamingText: Map<String, String>
 }
 
 @Composable
-private fun AssistantCard(info: LegacyInfo, parts: List<LegacyPart>, streamingText: Map<String, String>, streamVersion: Int) {
+private fun AssistantCard(info: LegacyInfo, parts: List<LegacyPart>, streamingText: Map<String, String>, streamVersion: Int, projectRoot: String) {
     streamVersion
     Column(Modifier.fillMaxWidth().padding(start = 8.dp)) {
         if (info.error != null) {
@@ -692,12 +692,12 @@ private fun AssistantCard(info: LegacyInfo, parts: List<LegacyPart>, streamingTe
                 }
             }
         }
-        parts.forEach { PartContent(it, streamingText, streamVersion) }
+        parts.forEach { PartContent(it, streamingText, streamVersion, projectRoot) }
     }
 }
 
 @Composable
-private fun PartContent(part: LegacyPart, streamingText: Map<String, String>, streamVersion: Int) {
+private fun PartContent(part: LegacyPart, streamingText: Map<String, String>, streamVersion: Int, projectRoot: String) {
     streamVersion
     when (part.type) {
         "text" -> {
@@ -714,7 +714,7 @@ private fun PartContent(part: LegacyPart, streamingText: Map<String, String>, st
             }
         }
         "reasoning" -> ReasoningPart(part, streamingText, streamVersion)
-        "tool" -> ToolPart(part)
+        "tool" -> ToolPart(part, projectRoot)
         "compaction" -> Box(
             Modifier.fillMaxWidth(),
             contentAlignment = Alignment.Center,
@@ -747,7 +747,7 @@ private fun PartContent(part: LegacyPart, streamingText: Map<String, String>, st
 }
 
 @Composable
-private fun ToolPart(part: LegacyPart) {
+private fun ToolPart(part: LegacyPart, projectRoot: String) {
     val tc = when (part.state?.status) {
         "pending" -> MaterialTheme.colorScheme.outline
         "running" -> MaterialTheme.colorScheme.tertiary
@@ -755,7 +755,7 @@ private fun ToolPart(part: LegacyPart) {
         "error" -> MaterialTheme.colorScheme.error
         else -> MaterialTheme.colorScheme.outline
     }
-    val label = toolLabel(part)
+    val label = toolLabel(part, projectRoot)
     val matchSuffix = matchCount(part)
     if (part.tool == "task") {
         val desc = taskDescription(part)
@@ -921,7 +921,13 @@ private fun matchCount(part: LegacyPart): String? {
     return if (count > 0) "($count matches)" else null
 }
 
-private fun toolLabel(part: LegacyPart): String {
+private fun relativePath(absolute: String, root: String): String {
+    val normalized = root.trimEnd('/') + "/"
+    val rel = absolute.removePrefix(normalized)
+    return if (rel != absolute) rel else absolute.substringAfterLast('/').ifEmpty { absolute }
+}
+
+private fun toolLabel(part: LegacyPart, projectRoot: String): String {
     val input = when (val s = part.state) {
         is LegacyToolState.Pending -> s.input
         is LegacyToolState.Running -> s.input
@@ -931,7 +937,7 @@ private fun toolLabel(part: LegacyPart): String {
     }
     val obj = input as? JsonObject ?: return part.tool ?: "tool"
     return when(part.tool) {
-        "read","write","edit" -> obj["filePath"]?.toString()?.removeSurrounding("\"")?.substringAfterLast('/')?.ifEmpty{null} ?: (part.tool ?: "tool")
+        "read","write","edit" -> obj["filePath"]?.toString()?.removeSurrounding("\"")?.let { relativePath(it, projectRoot) }?.ifEmpty{null} ?: (part.tool ?: "tool")
         "glob","grep" -> obj["pattern"]?.toString()?.removeSurrounding("\"").let{ if(it!=null&&it.length>40) it.take(40)+"..." else it} ?: (part.tool ?: "tool")
         "bash" -> obj["command"]?.toString()?.removeSurrounding("\"").let{ if(it!=null) "$$it" else null} ?: "bash"
         "task" -> {

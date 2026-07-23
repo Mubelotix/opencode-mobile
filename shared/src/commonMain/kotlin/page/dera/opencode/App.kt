@@ -114,6 +114,7 @@ fun App() {
                     sessionId = current.session.id,
                     sessionTitle = current.session.title,
                     directory = current.directory,
+                    projectRoot = current.session.location.directory,
                     onBack = { screen = Screen.ProjectDetail(current.api, current.directory, current.projectName) },
                 )
             }
