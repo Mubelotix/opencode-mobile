@@ -97,6 +97,29 @@ class OpencodeApi(
         } catch (e: Exception) { println("OC_DBG: permission reply error=${e.message}"); Result.failure(e) }
     }
 
+    suspend fun replyQuestion(sessionId: String, requestId: String, answers: List<List<String>>, directory: String): Result<Unit> {
+        return try {
+            val resp = client.post("$serverUrl/question/$requestId/reply") {
+                authHeader()?.let { (k, v) -> header(k, v) }; contentType(ContentType.Application.Json)
+                url.parameters.append("directory", directory)
+                setBody(json.encodeToString(QuestionReplyPayload.serializer(), QuestionReplyPayload(answers)))
+            }
+            println("OC_DBG: question reply status=${resp.status} body=${resp.bodyAsText()}")
+            if (resp.status.isSuccess()) Result.success(Unit) else Result.failure(Exception("HTTP ${resp.status.value}: ${resp.bodyAsText()}"))
+        } catch (e: Exception) { println("OC_DBG: question reply error=${e.message}"); Result.failure(e) }
+    }
+
+    suspend fun rejectQuestion(sessionId: String, requestId: String, directory: String): Result<Unit> {
+        return try {
+            val resp = client.post("$serverUrl/question/$requestId/reject") {
+                authHeader()?.let { (k, v) -> header(k, v) }
+                url.parameters.append("directory", directory)
+            }
+            println("OC_DBG: question reject status=${resp.status} body=${resp.bodyAsText()}")
+            if (resp.status.isSuccess()) Result.success(Unit) else Result.failure(Exception("HTTP ${resp.status.value}: ${resp.bodyAsText()}"))
+        } catch (e: Exception) { println("OC_DBG: question reject error=${e.message}"); Result.failure(e) }
+    }
+
     suspend fun sendPrompt(sessionId: String, text: String): Result<Unit> {
         return try {
             val p = LegacyPromptPayload(parts = listOf(LegacyPromptPart(type = "text", text = text, synthetic = false)))

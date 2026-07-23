@@ -243,3 +243,37 @@ data class PermissionToolRef(
     val messageID: String = "",
     val callID: String = "",
 )
+
+@Serializable
+data class QuestionRequest(
+    val id: String = "",
+    val sessionID: String = "",
+    val questions: List<QuestionInfo> = emptyList(),
+    val tool: QuestionToolRef? = null,
+)
+
+@Serializable
+data class QuestionInfo(
+    val question: String = "",
+    val header: String = "",
+    val options: List<QuestionOption> = emptyList(),
+    val multiple: Boolean = false,
+    val custom: Boolean = true,
+)
+
+@Serializable
+data class QuestionOption(
+    val label: String = "",
+    val description: String = "",
+)
+
+@Serializable
+data class QuestionToolRef(
+    val messageID: String = "",
+    val callID: String = "",
+)
+
+@Serializable
+data class QuestionReplyPayload(
+    val answers: List<List<String>>,
+)

@@ -24,10 +24,12 @@ import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
+import androidx.compose.material3.Checkbox
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.RadioButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
@@ -57,6 +59,10 @@ import page.dera.opencode.api.LegacyWithParts
 import page.dera.opencode.api.OpencodeApi
 import page.dera.opencode.api.PermissionRequest
 import page.dera.opencode.api.PermissionToolRef
+import page.dera.opencode.api.QuestionInfo
+import page.dera.opencode.api.QuestionOption
+import page.dera.opencode.api.QuestionRequest
+import page.dera.opencode.api.QuestionToolRef
 import page.dera.opencode.api.SessionTokens
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonObject
@@ -69,6 +75,7 @@ import com.mikepenz.markdown.model.rememberMarkdownState
 import opencodeapp.shared.generated.resources.searchIcon
 import opencodeapp.shared.generated.resources.botIcon
 import opencodeapp.shared.generated.resources.brainIcon
+import opencodeapp.shared.generated.resources.circleQuestionMarkIcon
 import opencodeapp.shared.generated.resources.Res
 import opencodeapp.shared.generated.resources.clock
 import opencodeapp.shared.generated.resources.file
@@ -92,6 +99,7 @@ fun SessionDetailScreen(api: OpencodeApi, sessionId: String, sessionTitle: Strin
     val streamingText = remember { mutableStateMapOf<String, String>() }
     var streamVersion by remember { mutableStateOf(0) }
     val permissionRequests = remember { mutableStateListOf<PermissionRequest>() }
+    val questionRequests = remember { mutableStateListOf<QuestionRequest>() }
     val scope = rememberCoroutineScope()
 
     LaunchedEffect(sessionId) {
@@ -173,6 +181,46 @@ fun SessionDetailScreen(api: OpencodeApi, sessionId: String, sessionTitle: Strin
                         val rid = props["requestID"]?.jsonPrimitive?.content ?: return@collect
                         println("OC_DBG: permission.replied requestID=$rid")
                         permissionRequests.removeAll { it.id == rid }
+                    }
+                    "question.asked" -> {
+                        val id = props["id"]?.jsonPrimitive?.content ?: return@collect
+                        val qlist = mutableListOf<QuestionInfo>()
+                        props["questions"]?.jsonArray?.forEach { qj ->
+                            val obj = qj.jsonObject
+                            val opts = mutableListOf<QuestionOption>()
+                            obj["options"]?.jsonArray?.forEach { oj ->
+                                val oo = oj.jsonObject
+                                opts.add(QuestionOption(
+                                    label = oo["label"]?.jsonPrimitive?.content ?: "",
+                                    description = oo["description"]?.jsonPrimitive?.content ?: ""
+                                ))
+                            }
+                            qlist.add(QuestionInfo(
+                                question = obj["question"]?.jsonPrimitive?.content ?: "",
+                                header = obj["header"]?.jsonPrimitive?.content ?: "",
+                                options = opts,
+                                multiple = obj["multiple"]?.jsonPrimitive?.content?.toBooleanStrictOrNull() ?: false,
+                                custom = obj["custom"]?.jsonPrimitive?.content?.toBooleanStrictOrNull() ?: true
+                            ))
+                        }
+                        val tool = props["tool"]?.jsonObject?.let {
+                            QuestionToolRef(
+                                messageID = it["messageID"]?.jsonPrimitive?.content ?: "",
+                                callID = it["callID"]?.jsonPrimitive?.content ?: ""
+                            )
+                        }
+                        val req = QuestionRequest(id = id, sessionID = sid, questions = qlist, tool = tool)
+                        if (questionRequests.none { it.id == id }) questionRequests.add(req)
+                    }
+                    "question.replied" -> {
+                        val rid = props["requestID"]?.jsonPrimitive?.content ?: return@collect
+                        println("OC_DBG: question.replied requestID=$rid")
+                        questionRequests.removeAll { it.id == rid }
+                    }
+                    "question.rejected" -> {
+                        val rid = props["requestID"]?.jsonPrimitive?.content ?: return@collect
+                        println("OC_DBG: question.rejected requestID=$rid")
+                        questionRequests.removeAll { it.id == rid }
                     }
                     "session.diff" -> {
                         val diff = props["diff"]?.jsonArray
@@ -268,6 +316,7 @@ fun SessionDetailScreen(api: OpencodeApi, sessionId: String, sessionTitle: Strin
                 }
             }
             permissionRequests.forEach { req -> PermissionPrompt(req, api, sessionId, directory) }
+            questionRequests.forEach { req -> QuestionPrompt(req, api, sessionId, directory) }
             if (messages.isEmpty() && !isLoading) Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) { Text(sessionTitle.ifEmpty { "Session" }, style = MaterialTheme.typography.headlineSmall) }
             else {
                 LazyColumn(state = listState, modifier = Modifier.fillMaxSize(), verticalArrangement = Arrangement.spacedBy(0.dp), contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = 12.dp, vertical = 8.dp)) {
@@ -401,6 +450,154 @@ private fun thinkingDurationSeconds(ms: Long): String {
                     contentColor = MaterialTheme.colorScheme.onErrorContainer
                 )) {
                     Text("Deny")
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun QuestionPrompt(req: QuestionRequest, api: OpencodeApi, sessionId: String, directory: String) {
+    val scope = rememberCoroutineScope()
+    var replying by remember { mutableStateOf(false) }
+    val selectedOptions = remember { req.questions.map { mutableStateListOf<String>() } }
+    val customAnswers = remember { req.questions.map { mutableStateOf("") } }
+    val customEnabled = remember { req.questions.map { mutableStateOf(false) } }
+
+    fun buildAnswers(): List<List<String>> {
+        return req.questions.mapIndexed { i, _ ->
+            val selected = selectedOptions[i].toList()
+            val custom = customAnswers[i].value
+            if (selected.isEmpty() && custom.isBlank()) emptyList()
+            else if (selected.isEmpty()) listOf(custom)
+            else {
+                if (custom.isNotBlank()) selected + custom else selected
+            }
+        }
+    }
+
+    Box(Modifier.fillMaxWidth().clip(RoundedCornerShape(12.dp)).background(MaterialTheme.colorScheme.secondaryContainer).padding(12.dp)) {
+        Column {
+            Text("OpenCode asks", style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.onSecondaryContainer)
+            req.questions.forEachIndexed { i, q ->
+                Spacer(Modifier.height(8.dp))
+                Text(q.header.ifEmpty { q.question }, style = MaterialTheme.typography.titleSmall, color = MaterialTheme.colorScheme.onSecondaryContainer)
+                if (q.header.isNotEmpty() && q.question.isNotEmpty()) {
+                    Spacer(Modifier.height(2.dp))
+                    Text(q.question, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSecondaryContainer.copy(alpha = .7f))
+                }
+                Spacer(Modifier.height(4.dp))
+                q.options.forEach { opt ->
+                    val isSelected = opt.label in selectedOptions[i]
+                    Row(
+                        Modifier.fillMaxWidth().clickable {
+                            if (q.multiple) {
+                                if (isSelected) selectedOptions[i].remove(opt.label) else selectedOptions[i].add(opt.label)
+                            } else {
+                                selectedOptions[i].clear()
+                                selectedOptions[i].add(opt.label)
+                            }
+                        }.padding(vertical = 4.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        if (q.multiple) {
+                            Checkbox(
+                                checked = isSelected,
+                                onCheckedChange = { checked ->
+                                    if (checked) selectedOptions[i].add(opt.label) else selectedOptions[i].remove(opt.label)
+                                },
+                                modifier = Modifier.size(20.dp)
+                            )
+                        } else {
+                            RadioButton(
+                                selected = isSelected,
+                                onClick = {
+                                    selectedOptions[i].clear()
+                                    selectedOptions[i].add(opt.label)
+                                },
+                                modifier = Modifier.size(20.dp)
+                            )
+                        }
+                        Spacer(Modifier.width(4.dp))
+                        Column {
+                            Text(opt.label, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSecondaryContainer)
+                            if (opt.description.isNotBlank()) {
+                                Text(opt.description, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSecondaryContainer.copy(alpha = .7f))
+                            }
+                        }
+                    }
+                }
+                if (q.custom) {
+                    val isCustomOn = customEnabled[i].value
+                    Row(
+                        Modifier.fillMaxWidth().clickable {
+                            if (q.multiple) {
+                                customEnabled[i].value = !isCustomOn
+                            } else {
+                                selectedOptions[i].clear()
+                                customEnabled[i].value = !isCustomOn
+                            }
+                        }.padding(vertical = 4.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        if (q.multiple) {
+                            Checkbox(
+                                checked = isCustomOn,
+                                onCheckedChange = { customEnabled[i].value = it },
+                                modifier = Modifier.size(20.dp)
+                            )
+                        } else {
+                            RadioButton(
+                                selected = isCustomOn,
+                                onClick = {
+                                    selectedOptions[i].clear()
+                                    customEnabled[i].value = true
+                                },
+                                modifier = Modifier.size(20.dp)
+                            )
+                        }
+                        Spacer(Modifier.width(4.dp))
+                        Text("Type your own answer", style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSecondaryContainer)
+                    }
+                    if (isCustomOn) {
+                        Spacer(Modifier.height(4.dp))
+                        OutlinedTextField(
+                            value = customAnswers[i].value,
+                            onValueChange = { customAnswers[i].value = it },
+                            modifier = Modifier.fillMaxWidth(),
+                            placeholder = { Text("Custom answer...") },
+                            maxLines = 2,
+                            enabled = !replying,
+                        )
+                    }
+                }
+            }
+            Spacer(Modifier.height(8.dp))
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                Button(onClick = {
+                    val answers = buildAnswers()
+                    println("OC_DBG: question submit ${req.id} answers=$answers")
+                    replying = true
+                    scope.launch {
+                        val r = api.replyQuestion(sessionId, req.id, answers, directory)
+                        println("OC_DBG: question reply result=$r")
+                        replying = false
+                    }
+                }, enabled = !replying) {
+                    Text("Submit")
+                }
+                Button(onClick = {
+                    replying = true
+                    scope.launch {
+                        val r = api.rejectQuestion(sessionId, req.id, directory)
+                        println("OC_DBG: question dismiss result=$r")
+                        replying = false
+                    }
+                }, enabled = !replying, colors = ButtonDefaults.buttonColors(
+                    containerColor = MaterialTheme.colorScheme.errorContainer,
+                    contentColor = MaterialTheme.colorScheme.onErrorContainer
+                )) {
+                    Text("Dismiss")
                 }
             }
         }
@@ -624,6 +821,7 @@ private fun ToolPart(part: LegacyPart) {
     } else {
         val icon = when (part.tool) {
             "glob", "grep" -> searchIcon
+            "question" -> circleQuestionMarkIcon
             else -> Res.drawable.file
         }
         Row(
@@ -682,6 +880,13 @@ private fun toolLabel(part: LegacyPart): String {
         "task" -> {
             val subType = obj["subagent_type"]?.toString()?.removeSurrounding("\"") ?: ""
             if (subType.isNotBlank()) "Launched $subType agent" else "Launched agent"
+        }
+        "question" -> {
+            val questions = obj["questions"]?.jsonArray
+            val first = questions?.firstOrNull()?.jsonObject
+            first?.get("question")?.toString()?.removeSurrounding("\"")
+                ?: first?.get("header")?.toString()?.removeSurrounding("\"")
+                ?: "Asking question"
         }
         else -> part.tool ?: "tool"
     }
