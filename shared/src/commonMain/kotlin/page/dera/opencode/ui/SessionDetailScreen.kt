@@ -83,6 +83,7 @@ import opencodeapp.shared.generated.resources.searchIcon
 import opencodeapp.shared.generated.resources.botIcon
 import opencodeapp.shared.generated.resources.brainIcon
 import opencodeapp.shared.generated.resources.circleQuestionMarkIcon
+import opencodeapp.shared.generated.resources.circleXIcon
 import opencodeapp.shared.generated.resources.Res
 import opencodeapp.shared.generated.resources.clock
 import opencodeapp.shared.generated.resources.file
@@ -843,8 +844,9 @@ private fun ToolPart(part: LegacyPart, projectRoot: String) {
         }
     } else {
         var expanded by remember { mutableStateOf(false) }
-        val isExpandable = part.tool in setOf("websearch", "webfetch", "question")
+        val isExpandable = part.tool in setOf("websearch", "webfetch", "question", "invalid")
         val icon = when {
+            part.tool == "invalid" -> circleXIcon
             part.tool == "read" && isDirectoryRead(part) -> Res.drawable.folder
             part.tool in listOf("glob", "grep") -> searchIcon
             part.tool == "question" -> circleQuestionMarkIcon
@@ -995,6 +997,13 @@ private fun toolLabel(part: LegacyPart, projectRoot: String): String {
             } ?: it
             if (host != null && host.length > 40) host.take(40) + "..." else host
         } ?: "webfetch"
+        "invalid" -> {
+            val tool = obj["tool"]?.toString()?.removeSurrounding("\"") ?: ""
+            val error = obj["error"]?.toString()?.removeSurrounding("\"") ?: ""
+            if (tool.isNotBlank() && error.isNotBlank()) "Invalid $tool: $error"
+            else if (tool.isNotBlank()) "Invalid $tool"
+            else "Invalid tool call"
+        }
         else -> part.tool ?: "tool"
     }
 }

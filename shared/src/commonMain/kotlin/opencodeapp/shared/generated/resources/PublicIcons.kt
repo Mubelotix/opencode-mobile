@@ -7,3 +7,4 @@ val botIcon: DrawableResource get() = Res.drawable.bot
 val brainIcon: DrawableResource get() = Res.drawable.brain
 val circleQuestionMarkIcon: DrawableResource get() = Res.drawable.circle_question_mark
 val globeIcon: DrawableResource get() = Res.drawable.globe
+val circleXIcon: DrawableResource get() = Res.drawable.circle_x
