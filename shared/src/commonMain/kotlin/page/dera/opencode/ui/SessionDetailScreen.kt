@@ -164,6 +164,19 @@ fun SessionDetailScreen(api: OpencodeApi, sessionId: String, sessionTitle: Strin
                         println("OC_DBG: permission.replied requestID=$rid")
                         permissionRequests.removeAll { it.id == rid }
                     }
+                    "session.diff" -> {
+                        val diff = props["diff"]?.jsonArray
+                        if (diff != null && diff.isEmpty()) return@collect
+                        val rawId = "evt_${event.payload?.type ?: "unknown"}_${kotlin.random.Random.nextLong().toString(36)}"
+                        val display = event.payload?.properties?.toString() ?: "{}"
+                        println("OC_DBG: session.diff props=$display")
+                        if (messages.none { it.info.id == rawId }) {
+                            messages.add(LegacyWithParts(
+                                LegacyInfo(id = rawId, sessionID = sessionId, role = "system"),
+                                listOf(LegacyPart(id = rawId, sessionID = sessionId, messageID = rawId, type = "text", text = "[${event.payload?.type ?: "unknown"}] $display"))
+                            ))
+                        }
+                    }
                     else -> {
                         val rawId = "evt_${event.payload?.type ?: "unknown"}_${kotlin.random.Random.nextLong().toString(36)}"
                         val display = event.payload?.properties?.toString() ?: "{}"
