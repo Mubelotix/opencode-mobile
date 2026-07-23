@@ -81,6 +81,7 @@ import opencodeapp.shared.generated.resources.circleQuestionMarkIcon
 import opencodeapp.shared.generated.resources.Res
 import opencodeapp.shared.generated.resources.clock
 import opencodeapp.shared.generated.resources.file
+import opencodeapp.shared.generated.resources.folder
 import opencodeapp.shared.generated.resources.terminal
 import opencodeapp.shared.generated.resources.triangle_alert
 import org.jetbrains.compose.resources.painterResource
@@ -827,10 +828,11 @@ private fun ToolPart(part: LegacyPart, projectRoot: String) {
     } else {
         var expanded by remember { mutableStateOf(false) }
         val isExpandable = part.tool in setOf("websearch", "webfetch")
-        val icon = when (part.tool) {
-            "glob", "grep" -> searchIcon
-            "question" -> circleQuestionMarkIcon
-            "websearch", "webfetch" -> globeIcon
+        val icon = when {
+            part.tool == "read" && isDirectoryRead(part) -> Res.drawable.folder
+            part.tool in listOf("glob", "grep") -> searchIcon
+            part.tool == "question" -> circleQuestionMarkIcon
+            part.tool in listOf("websearch", "webfetch") -> globeIcon
             else -> Res.drawable.file
         }
         Column {
@@ -919,6 +921,15 @@ private fun matchCount(part: LegacyPart): String? {
     }
     val count = output.lines().count { it.isNotBlank() }
     return if (count > 0) "($count matches)" else null
+}
+
+private fun isDirectoryRead(part: LegacyPart): Boolean {
+    val meta = when (val s = part.state) {
+        is LegacyToolState.Running -> s.metadata
+        is LegacyToolState.Completed -> s.metadata
+        else -> null
+    }
+    return meta?.jsonObject?.get("display")?.jsonObject?.get("type")?.jsonPrimitive?.contentOrNull == "directory"
 }
 
 private fun relativePath(absolute: String, root: String): String {
