@@ -32,6 +32,7 @@ import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Checkbox
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.RadioButton
@@ -85,7 +86,9 @@ import opencodeapp.shared.generated.resources.searchIcon
 import opencodeapp.shared.generated.resources.botIcon
 import opencodeapp.shared.generated.resources.brainIcon
 import opencodeapp.shared.generated.resources.circleQuestionMarkIcon
+import opencodeapp.shared.generated.resources.checkIcon
 import opencodeapp.shared.generated.resources.circleXIcon
+import opencodeapp.shared.generated.resources.infinityIcon
 import opencodeapp.shared.generated.resources.Res
 import opencodeapp.shared.generated.resources.clock
 import opencodeapp.shared.generated.resources.file
@@ -440,7 +443,7 @@ private fun thinkingDurationSeconds(ms: Long): String {
                 Text(req.patterns.joinToString(", ") { relativePath(it, projectRoot) }, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSecondaryContainer.copy(alpha = .7f))
             }
             Spacer(Modifier.height(8.dp))
-            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceEvenly) {
                 Button(onClick = {
                     replying = true
                     scope.launch {
@@ -449,7 +452,10 @@ private fun thinkingDurationSeconds(ms: Long): String {
                         replying = false
                     }
                 }, enabled = !replying) {
-                    Text("Always allow")
+                    Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                        Icon(painterResource(infinityIcon), null, Modifier.size(18.dp))
+                        Text("Always allow", maxLines = 1, style = MaterialTheme.typography.labelSmall)
+                    }
                 }
                 Button(onClick = {
                     replying = true
@@ -459,7 +465,10 @@ private fun thinkingDurationSeconds(ms: Long): String {
                         replying = false
                     }
                 }, enabled = !replying) {
-                    Text("Approve once")
+                    Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                        Icon(painterResource(checkIcon), null, Modifier.size(18.dp))
+                        Text("Approve once", maxLines = 1, style = MaterialTheme.typography.labelSmall)
+                    }
                 }
                 OutlinedButton(onClick = {
                     replying = true
@@ -475,7 +484,10 @@ private fun thinkingDurationSeconds(ms: Long): String {
                     ),
                     border = BorderStroke(1.dp, MaterialTheme.colorScheme.error)
                 ) {
-                    Text("Deny")
+                    Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                        Icon(painterResource(circleXIcon), null, Modifier.size(18.dp))
+                        Text("Deny", maxLines = 1, style = MaterialTheme.typography.labelSmall)
+                    }
                 }
             }
         }
@@ -599,7 +611,7 @@ private fun QuestionPrompt(req: QuestionRequest, api: OpencodeApi, sessionId: St
                 }
             }
             Spacer(Modifier.height(8.dp))
-            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceEvenly) {
                 Button(onClick = {
                     val answers = buildAnswers()
                     println("OC_DBG: question submit ${req.id} answers=$answers")
@@ -610,7 +622,10 @@ private fun QuestionPrompt(req: QuestionRequest, api: OpencodeApi, sessionId: St
                         replying = false
                     }
                 }, enabled = !replying) {
-                    Text("Submit")
+                    Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                        Icon(painterResource(checkIcon), null, Modifier.size(18.dp))
+                        Text("Submit", maxLines = 1, style = MaterialTheme.typography.labelSmall)
+                    }
                 }
                 OutlinedButton(onClick = {
                     replying = true
@@ -626,7 +641,10 @@ private fun QuestionPrompt(req: QuestionRequest, api: OpencodeApi, sessionId: St
                     ),
                     border = BorderStroke(1.dp, MaterialTheme.colorScheme.error)
                 ) {
-                    Text("Dismiss")
+                    Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                        Icon(painterResource(circleXIcon), null, Modifier.size(18.dp))
+                        Text("Dismiss", maxLines = 1, style = MaterialTheme.typography.labelSmall)
+                    }
                 }
             }
         }
