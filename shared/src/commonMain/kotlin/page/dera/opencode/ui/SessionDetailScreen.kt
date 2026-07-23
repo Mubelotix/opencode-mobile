@@ -54,6 +54,7 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontFamily
@@ -86,6 +87,7 @@ import com.mikepenz.markdown.model.rememberMarkdownState
 import opencodeapp.shared.generated.resources.globeIcon
 import opencodeapp.shared.generated.resources.searchIcon
 import opencodeapp.shared.generated.resources.sendIcon
+import opencodeapp.shared.generated.resources.infoIcon
 import opencodeapp.shared.generated.resources.botIcon
 import opencodeapp.shared.generated.resources.brainIcon
 import opencodeapp.shared.generated.resources.circleQuestionMarkIcon
@@ -98,7 +100,11 @@ import opencodeapp.shared.generated.resources.file
 import opencodeapp.shared.generated.resources.folder
 import opencodeapp.shared.generated.resources.terminal
 import opencodeapp.shared.generated.resources.triangle_alert
+import opencodeapp.shared.generated.resources.gitBranchIcon
+import opencodeapp.shared.generated.resources.listChecksIcon
 import opencodeapp.shared.generated.resources.menuIcon
+import opencodeapp.shared.generated.resources.messageSquareIcon
+import opencodeapp.shared.generated.resources.terminalIcon
 import org.jetbrains.compose.resources.painterResource
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -118,6 +124,7 @@ fun SessionDetailScreen(api: OpencodeApi, sessionId: String, sessionTitle: Strin
     var streamVersion by remember { mutableStateOf(0) }
     val permissionRequests = remember { mutableStateListOf<PermissionRequest>() }
     val questionRequests = remember { mutableStateListOf<QuestionRequest>() }
+    var selectedTab by remember { mutableStateOf(0) }
     val scope = rememberCoroutineScope()
 
     LaunchedEffect(sessionId) {
@@ -301,76 +308,134 @@ fun SessionDetailScreen(api: OpencodeApi, sessionId: String, sessionTitle: Strin
                 }
             )
         },
-        bottomBar = {},
+        bottomBar = {
+            Row(
+                Modifier.fillMaxWidth()
+                    .background(MaterialTheme.colorScheme.surface)
+                    .padding(horizontal = 12.dp, vertical = 3.dp),
+                horizontalArrangement = Arrangement.SpaceEvenly,
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                val tabs = listOf(
+                    Triple(messageSquareIcon, "Conversation", 0),
+                    Triple(gitBranchIcon, "Git Diff", 1),
+                    Triple(listChecksIcon, "Todo", 2),
+                    Triple(terminalIcon, "Terminal", 3),
+                    Triple(infoIcon, "Info", 4),
+                    Triple(globeIcon, "Browser", 5),
+                )
+                tabs.forEach { (icon, desc, index) ->
+                    val isSelected = selectedTab == index
+                    Column(
+                        horizontalAlignment = Alignment.CenterHorizontally,
+                        modifier = Modifier.clickable { selectedTab = index }.padding(horizontal = 12.dp, vertical = 2.dp),
+                    ) {
+                        Icon(
+                            painter = painterResource(icon),
+                            contentDescription = desc,
+                            tint = if (isSelected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
+                            modifier = Modifier.size(20.dp),
+                        )
+                        Spacer(Modifier.height(1.dp))
+                        Box(
+                            Modifier.width(16.dp).height(2.dp)
+                                .background(if (isSelected) MaterialTheme.colorScheme.primary else Color.Transparent, RoundedCornerShape(1.dp))
+                        )
+                    }
+                }
+            }
+        },
     ) { padding ->
-        Column(Modifier.fillMaxSize().padding(padding).imePadding()) {
-            if (errorText != null) {
-                Box(
-                    Modifier
-                        .fillMaxWidth()
-                        .background(MaterialTheme.colorScheme.errorContainer)
-                        .padding(12.dp),
-                ) {
-                    Text(
-                        errorText!!,
-                        color = MaterialTheme.colorScheme.onErrorContainer,
-                        style = MaterialTheme.typography.bodyMedium,
+        Box(Modifier.fillMaxSize().padding(padding)) {
+            Column(
+                Modifier.fillMaxSize()
+                    .imePadding()
+                    .then(if (selectedTab == 0) Modifier else Modifier.alpha(0f))
+            ) {
+                if (errorText != null) {
+                    Box(
+                        Modifier
+                            .fillMaxWidth()
+                            .background(MaterialTheme.colorScheme.errorContainer)
+                            .padding(12.dp),
+                    ) {
+                        Text(
+                            errorText!!,
+                            color = MaterialTheme.colorScheme.onErrorContainer,
+                            style = MaterialTheme.typography.bodyMedium,
+                        )
+                    }
+                }
+                Box(Modifier.weight(1f).fillMaxWidth()) {
+                    if (messages.isEmpty() && !isLoading) Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) { Text(sessionTitle.ifEmpty { "Session" }, style = MaterialTheme.typography.headlineSmall) }
+                    else {
+                        LazyColumn(state = listState, modifier = Modifier.fillMaxSize(), verticalArrangement = Arrangement.spacedBy(0.dp), contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = 12.dp, vertical = 8.dp)) {
+                            itemsIndexed(messages) { _, msg -> MessageCard(msg, streamingText, streamVersion, projectRoot) }
+                            if (isSending || isRunning) item { SendingIndicator() }
+                        }
+                    }
+                }
+                if (permissionRequests.isNotEmpty() || questionRequests.isNotEmpty()) {
+                    val scrollState = rememberScrollState()
+                    Box(Modifier.fillMaxWidth().heightIn(max = 400.dp).verticalScroll(scrollState)) {
+                        Column(Modifier.fillMaxWidth()) {
+                            permissionRequests.forEach { req -> PermissionPrompt(req, api, sessionId, directory, projectRoot) }
+                            questionRequests.forEach { req -> QuestionPrompt(req, api, sessionId, directory) }
+                        }
+                    }
+                }
+                val doSend = {
+                    if (inputText.isNotBlank()) {
+                        val t = inputText.trim()
+                        inputText = ""
+                        isSending = true
+                        errorText = null
+                        scope.launch {
+                            println("OC_DBG: send")
+                            if (api.sendPrompt(sessionId, t).isSuccess) {
+                                println("OC_DBG: send ok")
+                            } else {
+                                println("OC_DBG: send fail")
+                                errorText = "Failed to send"
+                            }
+                            isSending = false
+                        }
+                    }
+                }
+                Row(Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 8.dp), verticalAlignment = Alignment.Bottom) {
+                    OutlinedTextField(
+                        value = inputText, onValueChange = { inputText = it }, modifier = Modifier.weight(1f),
+                        placeholder = { Text("Type a message...") }, maxLines = 4,
+                        keyboardOptions = KeyboardOptions(imeAction = ImeAction.Send),
+                        keyboardActions = KeyboardActions(onSend = { doSend() }), enabled = !isSending
+                    )
+                    Spacer(Modifier.width(2.dp))
+                    Icon(
+                        painter = painterResource(sendIcon),
+                        contentDescription = "Send",
+                        tint = if (inputText.isNotBlank() && !isSending) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface.copy(alpha = 0.38f),
+                        modifier = Modifier
+                            .size(48.dp)
+                            .padding(12.dp)
+                            .clickable(enabled = inputText.isNotBlank() && !isSending) { doSend() }
                     )
                 }
             }
-            Box(Modifier.weight(1f).fillMaxWidth()) {
-                if (messages.isEmpty() && !isLoading) Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) { Text(sessionTitle.ifEmpty { "Session" }, style = MaterialTheme.typography.headlineSmall) }
-                else {
-                    LazyColumn(state = listState, modifier = Modifier.fillMaxSize(), verticalArrangement = Arrangement.spacedBy(0.dp), contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = 12.dp, vertical = 8.dp)) {
-                        itemsIndexed(messages) { _, msg -> MessageCard(msg, streamingText, streamVersion, projectRoot) }
-                        if (isSending || isRunning) item { SendingIndicator() }
-                    }
+            if (selectedTab != 0) {
+                Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                    Text(
+                    when (selectedTab) {
+                        1 -> "Git Diff"
+                        2 -> "Todo"
+                        3 -> "Terminal"
+                        4 -> "Info"
+                        5 -> "Browser"
+                        else -> ""
+                    },
+                        style = MaterialTheme.typography.bodyLarge,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
                 }
-            }
-            if (permissionRequests.isNotEmpty() || questionRequests.isNotEmpty()) {
-                val scrollState = rememberScrollState()
-                Box(Modifier.fillMaxWidth().heightIn(max = 400.dp).verticalScroll(scrollState)) {
-                    Column(Modifier.fillMaxWidth()) {
-                        permissionRequests.forEach { req -> PermissionPrompt(req, api, sessionId, directory, projectRoot) }
-                        questionRequests.forEach { req -> QuestionPrompt(req, api, sessionId, directory) }
-                    }
-                }
-            }
-            val doSend = {
-                if (inputText.isNotBlank()) {
-                    val t = inputText.trim()
-                    inputText = ""
-                    isSending = true
-                    errorText = null
-                    scope.launch {
-                        println("OC_DBG: send")
-                        if (api.sendPrompt(sessionId, t).isSuccess) {
-                            println("OC_DBG: send ok")
-                        } else {
-                            println("OC_DBG: send fail")
-                            errorText = "Failed to send"
-                        }
-                        isSending = false
-                    }
-                }
-            }
-            Row(Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 8.dp), verticalAlignment = Alignment.Bottom) {
-                OutlinedTextField(
-                    value = inputText, onValueChange = { inputText = it }, modifier = Modifier.weight(1f),
-                    placeholder = { Text("Type a message...") }, maxLines = 4,
-                    keyboardOptions = KeyboardOptions(imeAction = ImeAction.Send),
-                    keyboardActions = KeyboardActions(onSend = { doSend() }), enabled = !isSending
-                )
-                Spacer(Modifier.width(2.dp))
-                Icon(
-                    painter = painterResource(sendIcon),
-                    contentDescription = "Send",
-                    tint = if (inputText.isNotBlank() && !isSending) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface.copy(alpha = 0.38f),
-                    modifier = Modifier
-                        .size(48.dp)
-                        .padding(12.dp)
-                        .clickable(enabled = inputText.isNotBlank() && !isSending) { doSend() }
-                )
             }
         }
     }
