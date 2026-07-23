@@ -49,6 +49,7 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.input.ImeAction
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import kotlin.time.Clock
 import kotlinx.coroutines.launch
@@ -807,8 +808,11 @@ private fun ToolPart(part: LegacyPart, projectRoot: String) {
                         fontFamily = FontFamily.Monospace,
                         color = Color(0xFFCDD6F4),
                         maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                        softWrap = false,
+                        modifier = Modifier.weight(1f),
                     )
-                    Spacer(Modifier.weight(1f))
+                    Spacer(Modifier.width(4.dp))
                     Box(Modifier.size(6.dp).clip(CircleShape).background(tc))
                 }
                 if (part.state is LegacyToolState.Running) {
@@ -838,6 +842,7 @@ private fun ToolPart(part: LegacyPart, projectRoot: String) {
         Column {
             Row(
                 Modifier
+                    .fillMaxWidth()
                     .then(if (isExpandable) Modifier.clickable { expanded = !expanded } else Modifier)
                     .padding(vertical = 2.dp),
                 verticalAlignment = Alignment.CenterVertically,
@@ -849,6 +854,9 @@ private fun ToolPart(part: LegacyPart, projectRoot: String) {
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                     maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                    softWrap = false,
+                    modifier = Modifier.weight(1f),
                 )
                 if (matchSuffix != null) {
                     Text(
@@ -856,13 +864,17 @@ private fun ToolPart(part: LegacyPart, projectRoot: String) {
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.outline,
                         maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                        softWrap = false,
                     )
                 }
-                Spacer(Modifier.weight(1f))
+                Spacer(Modifier.width(4.dp))
                 Text(
                     part.state?.status ?: "",
                     style = MaterialTheme.typography.labelSmall,
                     color = tc.copy(alpha = .7f),
+                    overflow = TextOverflow.Ellipsis,
+                    softWrap = false,
                 )
             }
             if (expanded && isExpandable) {
