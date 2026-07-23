@@ -885,7 +885,7 @@ private fun ToolPart(part: LegacyPart, projectRoot: String) {
         }
     } else {
         var expanded by remember { mutableStateOf(false) }
-        val isExpandable = part.tool in setOf("websearch", "webfetch", "question", "invalid")
+        val isExpandable = part.tool in setOf("websearch", "webfetch", "question", "invalid", "read", "write", "edit")
         val icon = when {
             part.tool == "invalid" -> circleXIcon
             part.tool == "read" && isDirectoryRead(part) -> Res.drawable.folder
