@@ -325,6 +325,9 @@ private fun TabContent(
                 projectRoot = ts.session.location.directory,
                 onBack = { onUpdateTab(tab.copy(screen = TabScreen.ProjectDetail(ts.api, ts.directory, ts.projectName))) },
                 onMenuClick = onOpenDrawer,
+                onTitleChange = { newTitle ->
+                    onUpdateTab(tab.copy(screen = TabScreen.SessionDetail(ts.api, ts.directory, ts.projectName, ts.session.copy(title = newTitle))))
+                },
             )
         }
     }

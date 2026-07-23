@@ -54,12 +54,16 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.focusRequester
+import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.unit.dp
 import kotlin.time.Clock
 import kotlinx.coroutines.launch
@@ -109,7 +113,7 @@ import org.jetbrains.compose.resources.painterResource
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun SessionDetailScreen(api: OpencodeApi, sessionId: String, sessionTitle: String, directory: String, projectRoot: String, onBack: () -> Unit, onMenuClick: (() -> Unit)? = null) {
+fun SessionDetailScreen(api: OpencodeApi, sessionId: String, sessionTitle: String, directory: String, projectRoot: String, onBack: () -> Unit, onMenuClick: (() -> Unit)? = null, onTitleChange: ((String) -> Unit)? = null) {
     val messages = remember { mutableStateListOf<LegacyWithParts>() }
     val listState = rememberLazyListState()
     var inputText by remember { mutableStateOf("") }
@@ -120,6 +124,18 @@ fun SessionDetailScreen(api: OpencodeApi, sessionId: String, sessionTitle: Strin
     var sessionTokens by remember { mutableStateOf<SessionTokens?>(null) }
     var sessionCost by remember { mutableStateOf<Double?>(null) }
     var currentTitle by remember { mutableStateOf(sessionTitle) }
+    var isEditingTitle by remember { mutableStateOf(false) }
+    var editTitleText by remember { mutableStateOf(currentTitle) }
+    var titleWasFocused by remember { mutableStateOf(false) }
+    val titleFocusRequester = remember { FocusRequester() }
+
+    LaunchedEffect(isEditingTitle) {
+        if (isEditingTitle) {
+            editTitleText = currentTitle
+            titleWasFocused = false
+            titleFocusRequester.requestFocus()
+        }
+    }
     val streamingText = remember { mutableStateMapOf<String, String>() }
     var streamVersion by remember { mutableStateOf(0) }
     val permissionRequests = remember { mutableStateListOf<PermissionRequest>() }
@@ -285,7 +301,48 @@ fun SessionDetailScreen(api: OpencodeApi, sessionId: String, sessionTitle: Strin
             TopAppBar(
                 title = {
                     Column {
-                        Text(currentTitle.ifEmpty { "Session" }, style = MaterialTheme.typography.titleMedium, maxLines = 1)
+                        if (isEditingTitle) {
+                            val saveTitle = {
+                                val newTitle = editTitleText.trim()
+                                if (newTitle.isNotEmpty() && newTitle != currentTitle) {
+                                    val oldTitle = currentTitle
+                                    currentTitle = newTitle
+                                    scope.launch {
+                                        val result = api.updateSessionTitle(sessionId, newTitle, directory)
+                                        if (result.isFailure) {
+                                            currentTitle = oldTitle
+                                        } else {
+                                            onTitleChange?.invoke(newTitle)
+                                        }
+                                    }
+                                }
+                                isEditingTitle = false
+                            }
+                            OutlinedTextField(
+                                value = editTitleText,
+                                onValueChange = { editTitleText = it },
+                                singleLine = true,
+                                textStyle = MaterialTheme.typography.titleMedium,
+                                modifier = Modifier
+                                    .focusRequester(titleFocusRequester)
+                                    .onFocusChanged { focusState ->
+                                        if (focusState.isFocused) titleWasFocused = true
+                                        else if (!focusState.isFocused && titleWasFocused && isEditingTitle) {
+                                            saveTitle()
+                                        }
+                                    }
+                                    .fillMaxWidth(),
+                                keyboardOptions = KeyboardOptions(imeAction = ImeAction.Done),
+                                keyboardActions = KeyboardActions(onDone = { saveTitle() }),
+                            )
+                        } else {
+                            Text(
+                                currentTitle.ifEmpty { "Session" },
+                                style = MaterialTheme.typography.titleMedium,
+                                maxLines = 1,
+                                modifier = Modifier.clickable { isEditingTitle = true },
+                            )
+                        }
                         val subtitles = mutableListOf<String>()
                         val totalTokens = (sessionTokens?.input ?: 0) + (sessionTokens?.output ?: 0) + (sessionTokens?.reasoning ?: 0) + (sessionTokens?.cache?.read ?: 0) + (sessionTokens?.cache?.write ?: 0)
                         if (totalTokens > 0) subtitles.add(formatTokenCount(totalTokens))

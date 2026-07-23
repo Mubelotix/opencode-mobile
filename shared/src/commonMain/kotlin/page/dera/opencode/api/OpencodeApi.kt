@@ -3,6 +3,7 @@ package page.dera.opencode.api
 import io.ktor.client.HttpClient
 import io.ktor.client.request.get
 import io.ktor.client.request.header
+import io.ktor.client.request.patch
 import io.ktor.client.request.post
 import io.ktor.client.request.prepareGet
 import io.ktor.client.request.setBody
@@ -132,6 +133,19 @@ class OpencodeApi(
         } catch (e: Exception) { Result.failure(e) }
     }
 
+    suspend fun updateSessionTitle(sessionId: String, title: String, directory: String): Result<Unit> {
+        return try {
+            val p = SessionUpdatePayload(title = title)
+            client.patch("$serverUrl/session/$sessionId") {
+                authHeader()?.let { (k, v) -> header(k, v) }
+                contentType(ContentType.Application.Json)
+                url.parameters.append("directory", directory)
+                setBody(json.encodeToString(SessionUpdatePayload.serializer(), p))
+            }
+            Result.success(Unit)
+        } catch (e: Exception) { Result.failure(e) }
+    }
+
     fun streamGlobalEvents(directory: String): Flow<GlobalEvent> = flow {
         while (true) {
             println("OC_DBG: SSE connecting for dir=$directory")
@@ -186,3 +200,6 @@ data class GlobalEventPayload(
 
 @Serializable
 data class PermissionReplyPayload(val reply: String, val message: String? = null)
+
+@Serializable
+data class SessionUpdatePayload(val title: String)
