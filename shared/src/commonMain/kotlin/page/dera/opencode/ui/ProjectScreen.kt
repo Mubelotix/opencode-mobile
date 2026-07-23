@@ -38,7 +38,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import kotlin.time.Clock
-import kotlin.time.Instant
+
 import kotlinx.coroutines.launch
 import page.dera.opencode.api.OpencodeApi
 import page.dera.opencode.api.SessionInfo

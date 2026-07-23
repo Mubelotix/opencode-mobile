@@ -48,8 +48,8 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.unit.dp
-import kotlinx.coroutines.launch
 import kotlin.time.Clock
+import kotlinx.coroutines.launch
 import page.dera.opencode.api.LegacyInfo
 import page.dera.opencode.api.LegacyPart
 import page.dera.opencode.api.LegacyToolState
@@ -58,6 +58,7 @@ import page.dera.opencode.api.OpencodeApi
 import page.dera.opencode.api.PermissionRequest
 import page.dera.opencode.api.PermissionToolRef
 import page.dera.opencode.api.SessionTokens
+import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.contentOrNull
 import kotlinx.serialization.json.jsonArray
@@ -118,13 +119,18 @@ fun SessionDetailScreen(api: OpencodeApi, sessionId: String, sessionTitle: Strin
                         val p = props["part"]?.jsonObject ?: return@collect
                         val k = "${p["messageID"]?.jsonPrimitive?.content}:${p["id"]?.jsonPrimitive?.content}"
                         streamingText.remove(k)
-                        val part = try { kotlinx.serialization.json.Json { ignoreUnknownKeys = true; coerceInputValues = true }.decodeFromJsonElement(LegacyPart.serializer(), p) } catch (_: Exception) { return@collect }
+                        val part = try { Json { ignoreUnknownKeys = true; coerceInputValues = true }.decodeFromJsonElement(LegacyPart.serializer(), p) } catch (_: Exception) { return@collect }
                         val mi = messages.indexOfFirst { it.info.id == p["messageID"]?.jsonPrimitive?.content }
-                        if (mi >= 0) { val mp = messages[mi].parts.toMutableList(); val pi = mp.indexOfFirst { it.id == part.id }; if (pi >= 0) mp[pi] = part else mp.add(part); messages[mi] = LegacyWithParts(messages[mi].info, mp) }
+                        if (mi >= 0) {
+                        val mp = messages[mi].parts.toMutableList()
+                        val pi = mp.indexOfFirst { it.id == part.id }
+                        if (pi >= 0) mp[pi] = part else mp.add(part)
+                        messages[mi] = LegacyWithParts(messages[mi].info, mp)
+                    }
                     }
                     "message.updated" -> {
                         val infoJson = props["info"]?.jsonObject ?: return@collect
-                        val info = try { kotlinx.serialization.json.Json { ignoreUnknownKeys = true; coerceInputValues = true }.decodeFromJsonElement(LegacyInfo.serializer(), infoJson) } catch (_: Exception) { return@collect }
+                        val info = try { Json { ignoreUnknownKeys = true; coerceInputValues = true }.decodeFromJsonElement(LegacyInfo.serializer(), infoJson) } catch (_: Exception) { return@collect }
                         val mi = messages.indexOfFirst { it.info.id == info.id }
                         if (mi >= 0) messages[mi] = LegacyWithParts(info, messages[mi].parts) else messages.add(LegacyWithParts(info))
                     }
@@ -140,7 +146,7 @@ fun SessionDetailScreen(api: OpencodeApi, sessionId: String, sessionTitle: Strin
                         val infoJson = props["info"]?.jsonObject ?: return@collect
                         currentTitle = infoJson["title"]?.jsonPrimitive?.contentOrNull ?: currentTitle
                         try {
-                            sessionTokens = kotlinx.serialization.json.Json { ignoreUnknownKeys = true; coerceInputValues = true }.decodeFromJsonElement(SessionTokens.serializer(), infoJson["tokens"] ?: return@collect)
+                            sessionTokens = Json { ignoreUnknownKeys = true; coerceInputValues = true }.decodeFromJsonElement(SessionTokens.serializer(), infoJson["tokens"] ?: return@collect)
                         } catch (_: Exception) {}
                         sessionCost = infoJson["cost"]?.jsonPrimitive?.contentOrNull?.toDoubleOrNull()
                     }
@@ -218,8 +224,21 @@ fun SessionDetailScreen(api: OpencodeApi, sessionId: String, sessionTitle: Strin
         bottomBar = {
             Row(Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 8.dp), verticalAlignment = Alignment.Bottom) {
                 val doSend = {
-                    if (inputText.isNotBlank()) { val t = inputText.trim(); inputText = ""; isSending = true; errorText = null
-                        scope.launch { println("OC_DBG: send"); if (api.sendPrompt(sessionId, t).isSuccess) { println("OC_DBG: send ok") } else { println("OC_DBG: send fail"); errorText = "Failed to send" }; isSending = false }
+                    if (inputText.isNotBlank()) {
+                        val t = inputText.trim()
+                        inputText = ""
+                        isSending = true
+                        errorText = null
+                        scope.launch {
+                            println("OC_DBG: send")
+                            if (api.sendPrompt(sessionId, t).isSuccess) {
+                                println("OC_DBG: send ok")
+                            } else {
+                                println("OC_DBG: send fail")
+                                errorText = "Failed to send"
+                            }
+                            isSending = false
+                        }
                     }
                 }
                 OutlinedTextField(
@@ -234,7 +253,20 @@ fun SessionDetailScreen(api: OpencodeApi, sessionId: String, sessionTitle: Strin
         },
     ) { padding ->
         Column(Modifier.fillMaxSize().padding(padding)) {
-            if (errorText != null) Box(Modifier.fillMaxWidth().background(MaterialTheme.colorScheme.errorContainer).padding(12.dp)) { Text(errorText!!, color = MaterialTheme.colorScheme.onErrorContainer, style = MaterialTheme.typography.bodyMedium) }
+            if (errorText != null) {
+                Box(
+                    Modifier
+                        .fillMaxWidth()
+                        .background(MaterialTheme.colorScheme.errorContainer)
+                        .padding(12.dp),
+                ) {
+                    Text(
+                        errorText!!,
+                        color = MaterialTheme.colorScheme.onErrorContainer,
+                        style = MaterialTheme.typography.bodyMedium,
+                    )
+                }
+            }
             permissionRequests.forEach { req -> PermissionPrompt(req, api, sessionId, directory) }
             if (messages.isEmpty() && !isLoading) Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) { Text(sessionTitle.ifEmpty { "Session" }, style = MaterialTheme.typography.headlineSmall) }
             else {
@@ -247,7 +279,23 @@ fun SessionDetailScreen(api: OpencodeApi, sessionId: String, sessionTitle: Strin
     }
 }
 
-@Composable private fun SendingIndicator() = Box(Modifier.fillMaxWidth(), contentAlignment = Alignment.Center) { Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.padding(8.dp)) { CircularProgressIndicator(Modifier.size(16.dp), strokeWidth = 2.dp); Spacer(Modifier.width(8.dp)); Text("OpenCode responding...", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.outline) } }
+@Composable
+private fun SendingIndicator() {
+    Box(Modifier.fillMaxWidth(), contentAlignment = Alignment.Center) {
+        Row(
+            verticalAlignment = Alignment.CenterVertically,
+            modifier = Modifier.padding(8.dp),
+        ) {
+            CircularProgressIndicator(Modifier.size(16.dp), strokeWidth = 2.dp)
+            Spacer(Modifier.width(8.dp))
+            Text(
+                "OpenCode responding...",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.outline,
+            )
+        }
+    }
+}
 
 @Composable private fun ReasoningPart(part: LegacyPart, streamingText: Map<String, String>, streamVersion: Int) {
     streamVersion
@@ -359,32 +407,123 @@ private fun thinkingDurationSeconds(ms: Long): String {
     }
 }
 
-@Composable private fun MessageCard(msg: LegacyWithParts, streamingText: Map<String, String>, streamVersion: Int) {
+@Composable
+private fun MessageCard(msg: LegacyWithParts, streamingText: Map<String, String>, streamVersion: Int) {
     streamVersion
-    val parts = msg.parts.filter { it.type !in listOf("step-start","step-finish","snapshot","patch") }
+    val parts = msg.parts.filter { it.type !in listOf("step-start", "step-finish", "snapshot", "patch") }
     when (msg.info.role) {
-        "user" -> Row(Modifier.fillMaxWidth().padding(vertical = 2.dp), horizontalArrangement = Arrangement.End) { Column(Modifier.widthIn(max = 320.dp).clip(RoundedCornerShape(16.dp, 4.dp, 16.dp, 16.dp)).background(MaterialTheme.colorScheme.primaryContainer).padding(12.dp)) { Text(parts.filter { it.type=="text" }.joinToString("\n"){it.text ?: ""}.ifEmpty{"Sent a message"}, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onPrimaryContainer) } }
+        "user" -> Row(
+            Modifier.fillMaxWidth().padding(vertical = 2.dp),
+            horizontalArrangement = Arrangement.End,
+        ) {
+            Column(
+                Modifier
+                    .widthIn(max = 320.dp)
+                    .clip(RoundedCornerShape(16.dp, 4.dp, 16.dp, 16.dp))
+                    .background(MaterialTheme.colorScheme.primaryContainer)
+                    .padding(12.dp),
+            ) {
+                Text(
+                    parts.filter { it.type == "text" }.joinToString("\n") { it.text ?: "" }
+                        .ifEmpty { "Sent a message" },
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onPrimaryContainer,
+                )
+            }
+        }
         "assistant" -> AssistantCard(msg.info, parts, streamingText, streamVersion)
-        else -> Box(Modifier.fillMaxWidth().padding(vertical = 2.dp), contentAlignment = Alignment.Center) { Column(horizontalAlignment = Alignment.CenterHorizontally, modifier = Modifier.padding(vertical = 4.dp)) { Text("System message", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.outline); parts.filter { it.type == "text" && !it.text.isNullOrBlank() }.forEach { part -> Text(part.text!!, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.outline, modifier = Modifier.padding(top = 2.dp)) } } }
+        else -> Box(
+            Modifier.fillMaxWidth().padding(vertical = 2.dp),
+            contentAlignment = Alignment.Center,
+        ) {
+            Column(
+                horizontalAlignment = Alignment.CenterHorizontally,
+                modifier = Modifier.padding(vertical = 4.dp),
+            ) {
+                Text(
+                    "System message",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.outline,
+                )
+                parts.filter { it.type == "text" && !it.text.isNullOrBlank() }.forEach { part ->
+                    Text(
+                        part.text!!,
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.outline,
+                        modifier = Modifier.padding(top = 2.dp),
+                    )
+                }
+            }
+        }
     }
 }
 
-@Composable private fun AssistantCard(info: LegacyInfo, parts: List<LegacyPart>, streamingText: Map<String, String>, streamVersion: Int) {
+@Composable
+private fun AssistantCard(info: LegacyInfo, parts: List<LegacyPart>, streamingText: Map<String, String>, streamVersion: Int) {
     streamVersion
     Column(Modifier.fillMaxWidth().padding(start = 8.dp)) {
-        if (info.error != null) Box(Modifier.fillMaxWidth().clip(RoundedCornerShape(12.dp)).background(MaterialTheme.colorScheme.errorContainer).padding(14.dp)) { Row(verticalAlignment = Alignment.Top) { Image(painterResource(Res.drawable.triangle_alert), null, Modifier.size(22.dp)); Spacer(Modifier.width(10.dp)); Column { Text("Error", style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.onErrorContainer); Spacer(Modifier.height(4.dp)); Text(info.error!!.name, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onErrorContainer) } } }
+        if (info.error != null) {
+            Box(
+                Modifier
+                    .fillMaxWidth()
+                    .clip(RoundedCornerShape(12.dp))
+                    .background(MaterialTheme.colorScheme.errorContainer)
+                    .padding(14.dp),
+            ) {
+                Row(verticalAlignment = Alignment.Top) {
+                    Image(painterResource(Res.drawable.triangle_alert), null, Modifier.size(22.dp))
+                    Spacer(Modifier.width(10.dp))
+                    Column {
+                        Text(
+                            "Error",
+                            style = MaterialTheme.typography.labelLarge,
+                            color = MaterialTheme.colorScheme.onErrorContainer,
+                        )
+                        Spacer(Modifier.height(4.dp))
+                        Text(
+                            info.error!!.name,
+                            style = MaterialTheme.typography.bodyMedium,
+                            color = MaterialTheme.colorScheme.onErrorContainer,
+                        )
+                    }
+                }
+            }
+        }
         parts.forEach { PartContent(it, streamingText, streamVersion) }
     }
 }
 
-@Composable private fun PartContent(part: LegacyPart, streamingText: Map<String, String>, streamVersion: Int) {
+@Composable
+private fun PartContent(part: LegacyPart, streamingText: Map<String, String>, streamVersion: Int) {
     streamVersion
     when (part.type) {
-        "text" -> { val t = (streamingText["${part.messageID}:${part.id}"] ?: (part.text ?: "")).trimEnd(); val md = rememberMarkdownState(t, retainState = true); Box(Modifier.widthIn(max=360.dp).clip(RoundedCornerShape(4.dp,16.dp,16.dp,16.dp)).background(MaterialTheme.colorScheme.surfaceVariant).padding(12.dp)) { Markdown(md) } }
+        "text" -> {
+            val t = (streamingText["${part.messageID}:${part.id}"] ?: (part.text ?: "")).trimEnd()
+            val md = rememberMarkdownState(t, retainState = true)
+            Box(
+                Modifier
+                    .widthIn(max = 360.dp)
+                    .clip(RoundedCornerShape(4.dp, 16.dp, 16.dp, 16.dp))
+                    .background(MaterialTheme.colorScheme.surfaceVariant)
+                    .padding(12.dp),
+            ) {
+                Markdown(md)
+            }
+        }
         "reasoning" -> ReasoningPart(part, streamingText, streamVersion)
         "tool" -> ToolPart(part)
-        "compaction" -> Box(Modifier.fillMaxWidth(), contentAlignment = Alignment.Center) { Text("Context compacted", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.outline, modifier = Modifier.padding(vertical=4.dp)) }
-          "agent" -> AgentPart(part)
+        "compaction" -> Box(
+            Modifier.fillMaxWidth(),
+            contentAlignment = Alignment.Center,
+        ) {
+            Text(
+                "Context compacted",
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.outline,
+                modifier = Modifier.padding(vertical = 4.dp),
+            )
+        }
+        "agent" -> AgentPart(part)
     }
 }
 
@@ -404,30 +543,116 @@ private fun thinkingDurationSeconds(ms: Long): String {
     }
 }
 
-@Composable private fun ToolPart(part: LegacyPart) {
-    val tc = when(part.state?.status) { "pending"->MaterialTheme.colorScheme.outline; "running"->MaterialTheme.colorScheme.tertiary; "completed"->MaterialTheme.colorScheme.primary; "error"->MaterialTheme.colorScheme.error; else->MaterialTheme.colorScheme.outline }
+@Composable
+private fun ToolPart(part: LegacyPart) {
+    val tc = when (part.state?.status) {
+        "pending" -> MaterialTheme.colorScheme.outline
+        "running" -> MaterialTheme.colorScheme.tertiary
+        "completed" -> MaterialTheme.colorScheme.primary
+        "error" -> MaterialTheme.colorScheme.error
+        else -> MaterialTheme.colorScheme.outline
+    }
     val label = toolLabel(part)
     val matchSuffix = matchCount(part)
     if (part.tool == "task") {
         val desc = taskDescription(part)
-        Row(Modifier.padding(vertical = 2.dp).clip(RoundedCornerShape(8.dp)).background(MaterialTheme.colorScheme.surfaceVariant).padding(10.dp), verticalAlignment = Alignment.CenterVertically) {
+        Row(
+            Modifier
+                .padding(vertical = 2.dp)
+                .clip(RoundedCornerShape(8.dp))
+                .background(MaterialTheme.colorScheme.surfaceVariant)
+                .padding(10.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
             Image(painterResource(botIcon), null, Modifier.size(14.dp))
             Spacer(Modifier.width(8.dp))
             Column(Modifier.weight(1f)) {
-                Text(label, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                Text(
+                    label,
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
                 if (desc != null) {
                     Spacer(Modifier.height(2.dp))
-                    Text(desc, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.outline, maxLines = 2)
+                    Text(
+                        desc,
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.outline,
+                        maxLines = 2,
+                    )
                 }
             }
             Box(Modifier.size(6.dp).clip(CircleShape).background(tc))
         }
-    } else if (part.tool == "bash") Box(Modifier.fillMaxWidth().padding(vertical=2.dp).clip(RoundedCornerShape(8.dp)).background(Color(0xFF1E1E2E)).padding(10.dp)) {
-        Column { Row(verticalAlignment = Alignment.CenterVertically) { Image(painterResource(Res.drawable.terminal), null, Modifier.size(14.dp)); Spacer(Modifier.width(6.dp)); Text(label, style = MaterialTheme.typography.bodySmall, fontFamily = FontFamily.Monospace, color = Color(0xFFCDD6F4), maxLines=1); Spacer(Modifier.weight(1f)); Box(Modifier.size(6.dp).clip(CircleShape).background(tc)) }
-            if (part.state is LegacyToolState.Running) { Spacer(Modifier.height(4.dp)); Row(verticalAlignment = Alignment.CenterVertically) { CircularProgressIndicator(Modifier.size(12.dp), strokeWidth=1.5.dp); Spacer(Modifier.width(8.dp)); Text("Running...", style = MaterialTheme.typography.bodySmall, color = Color(0xFFA6ADC8)) } } }
+    } else if (part.tool == "bash") {
+        Box(
+            Modifier
+                .fillMaxWidth()
+                .padding(vertical = 2.dp)
+                .clip(RoundedCornerShape(8.dp))
+                .background(Color(0xFF1E1E2E))
+                .padding(10.dp),
+        ) {
+            Column {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Image(painterResource(Res.drawable.terminal), null, Modifier.size(14.dp))
+                    Spacer(Modifier.width(6.dp))
+                    Text(
+                        label,
+                        style = MaterialTheme.typography.bodySmall,
+                        fontFamily = FontFamily.Monospace,
+                        color = Color(0xFFCDD6F4),
+                        maxLines = 1,
+                    )
+                    Spacer(Modifier.weight(1f))
+                    Box(Modifier.size(6.dp).clip(CircleShape).background(tc))
+                }
+                if (part.state is LegacyToolState.Running) {
+                    Spacer(Modifier.height(4.dp))
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        CircularProgressIndicator(Modifier.size(12.dp), strokeWidth = 1.5.dp)
+                        Spacer(Modifier.width(8.dp))
+                        Text(
+                            "Running...",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = Color(0xFFA6ADC8),
+                        )
+                    }
+                }
+            }
+        }
     } else {
-        val icon = when(part.tool) { "glob","grep" -> searchIcon; else -> Res.drawable.file }
-        Row(Modifier.padding(vertical=2.dp), verticalAlignment = Alignment.CenterVertically) { Image(painterResource(icon), null, Modifier.size(14.dp)); Spacer(Modifier.width(4.dp)); Text(label, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines=1); if (matchSuffix != null) { Text(" $matchSuffix", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.outline, maxLines=1) }; Spacer(Modifier.weight(1f)); Text(part.state?.status ?: "", style = MaterialTheme.typography.labelSmall, color = tc.copy(alpha=.7f)) }
+        val icon = when (part.tool) {
+            "glob", "grep" -> searchIcon
+            else -> Res.drawable.file
+        }
+        Row(
+            Modifier.padding(vertical = 2.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Image(painterResource(icon), null, Modifier.size(14.dp))
+            Spacer(Modifier.width(4.dp))
+            Text(
+                label,
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                maxLines = 1,
+            )
+            if (matchSuffix != null) {
+                Text(
+                    " $matchSuffix",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.outline,
+                    maxLines = 1,
+                )
+            }
+            Spacer(Modifier.weight(1f))
+            Text(
+                part.state?.status ?: "",
+                style = MaterialTheme.typography.labelSmall,
+                color = tc.copy(alpha = .7f),
+            )
+        }
     }
 }
 
@@ -442,7 +667,13 @@ private fun matchCount(part: LegacyPart): String? {
 }
 
 private fun toolLabel(part: LegacyPart): String {
-    val input = when(val s=part.state) { is LegacyToolState.Pending->s.input; is LegacyToolState.Running->s.input; is LegacyToolState.Completed->s.input; is LegacyToolState.Error->s.input; null->null }
+    val input = when (val s = part.state) {
+        is LegacyToolState.Pending -> s.input
+        is LegacyToolState.Running -> s.input
+        is LegacyToolState.Completed -> s.input
+        is LegacyToolState.Error -> s.input
+        null -> null
+    }
     val obj = input as? JsonObject ?: return part.tool ?: "tool"
     return when(part.tool) {
         "read","write","edit" -> obj["filePath"]?.toString()?.removeSurrounding("\"")?.substringAfterLast('/')?.ifEmpty{null} ?: (part.tool ?: "tool")
@@ -457,7 +688,13 @@ private fun toolLabel(part: LegacyPart): String {
 }
 
 private fun taskDescription(part: LegacyPart): String? {
-    val input = when(val s=part.state) { is LegacyToolState.Pending->s.input; is LegacyToolState.Running->s.input; is LegacyToolState.Completed->s.input; is LegacyToolState.Error->s.input; null->null }
+    val input = when (val s = part.state) {
+        is LegacyToolState.Pending -> s.input
+        is LegacyToolState.Running -> s.input
+        is LegacyToolState.Completed -> s.input
+        is LegacyToolState.Error -> s.input
+        null -> null
+    }
     val obj = input as? JsonObject ?: return null
     return obj["description"]?.toString()?.removeSurrounding("\"")?.takeIf { it.isNotBlank() }
 }

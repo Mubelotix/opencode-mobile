@@ -15,8 +15,10 @@ import io.ktor.utils.io.readUTF8Line
 import kotlin.io.encoding.Base64
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.flow
+import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonArray
+import kotlinx.serialization.json.JsonElement
 
 class OpencodeApi(
     private val client: HttpClient,
@@ -135,13 +137,19 @@ sealed class ValidationResult {
     data class Error(val message: String) : ValidationResult()
 }
 
-@kotlinx.serialization.Serializable
+@Serializable
 data class GlobalEvent(
-    val directory: String = "", val project: String? = null, val workspace: String? = null,
+    val directory: String = "",
+    val project: String? = null,
+    val workspace: String? = null,
     val payload: GlobalEventPayload? = null,
 )
-@kotlinx.serialization.Serializable
-data class GlobalEventPayload(val type: String = "", val properties: kotlinx.serialization.json.JsonElement? = null)
 
-@kotlinx.serialization.Serializable
+@Serializable
+data class GlobalEventPayload(
+    val type: String = "",
+    val properties: JsonElement? = null,
+)
+
+@Serializable
 data class PermissionReplyPayload(val reply: String, val message: String? = null)
