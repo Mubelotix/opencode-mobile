@@ -21,9 +21,6 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
-import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.foundation.lazy.itemsIndexed
-import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardActions
@@ -46,6 +43,7 @@ import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.key
 import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.mutableStateMapOf
 import androidx.compose.runtime.mutableStateOf
@@ -66,6 +64,8 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.unit.dp
 import kotlin.time.Clock
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import page.dera.opencode.api.LegacyInfo
 import page.dera.opencode.api.LegacyPart
@@ -111,11 +111,15 @@ import opencodeapp.shared.generated.resources.messageSquareIcon
 import opencodeapp.shared.generated.resources.terminalIcon
 import org.jetbrains.compose.resources.painterResource
 
+private val prettyJson = Json { prettyPrint = true }
+private val urlHostRegex = Regex("://([^/]+)")
+private val markdownChars = setOf('#', '`', '[', '|')
+
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun SessionDetailScreen(api: OpencodeApi, sessionId: String, sessionTitle: String, directory: String, projectRoot: String, onBack: () -> Unit, onMenuClick: (() -> Unit)? = null, onTitleChange: ((String) -> Unit)? = null) {
     val messages = remember { mutableStateListOf<LegacyWithParts>() }
-    val listState = rememberLazyListState()
+    val scrollState = rememberScrollState()
     var inputText by remember { mutableStateOf("") }
     var isLoading by remember { mutableStateOf(true) }
     var isSending by remember { mutableStateOf(false) }
@@ -137,7 +141,6 @@ fun SessionDetailScreen(api: OpencodeApi, sessionId: String, sessionTitle: Strin
         }
     }
     val streamingText = remember { mutableStateMapOf<String, String>() }
-    var streamVersion by remember { mutableStateOf(0) }
     val permissionRequests = remember { mutableStateListOf<PermissionRequest>() }
     val questionRequests = remember { mutableStateListOf<QuestionRequest>() }
     var selectedTab by remember { mutableStateOf(0) }
@@ -150,9 +153,19 @@ fun SessionDetailScreen(api: OpencodeApi, sessionId: String, sessionTitle: Strin
         isLoading = false
     }
 
-    LaunchedEffect(messages.size) { if (messages.isNotEmpty()) listState.animateScrollToItem(messages.lastIndex) }
+    LaunchedEffect(messages.size) {
+        if (messages.isNotEmpty()) {
+            scrollState.scrollTo(scrollState.maxValue)
+        }
+    }
 
     LaunchedEffect(sessionId, directory) {
+        val pendingDeltas = mutableMapOf<String, StringBuilder>()
+        var flushJob: Job? = null
+        fun flushDeltas() {
+            pendingDeltas.forEach { (k, sb) -> streamingText[k] = (streamingText[k] ?: "") + sb.toString() }
+            pendingDeltas.clear()
+        }
         try {
             println("OC_DBG: SSE collect started session=$sessionId")
             api.streamGlobalEvents(directory).collect { event ->
@@ -163,132 +176,144 @@ fun SessionDetailScreen(api: OpencodeApi, sessionId: String, sessionTitle: Strin
                 when (evType) {
                     "message.part.delta" -> {
                         val k = "${props["messageID"]?.jsonPrimitive?.content}:${props["partID"]?.jsonPrimitive?.content}"
-                        streamingText[k] = (streamingText[k] ?: "") + (props["delta"]?.jsonPrimitive?.content ?: "")
-                        streamVersion++
-                    }
-                    "message.part.updated" -> {
-                        val p = props["part"]?.jsonObject ?: return@collect
-                        val k = "${p["messageID"]?.jsonPrimitive?.content}:${p["id"]?.jsonPrimitive?.content}"
-                        streamingText.remove(k)
-                        val part = try { Json { ignoreUnknownKeys = true; coerceInputValues = true }.decodeFromJsonElement(LegacyPart.serializer(), p) } catch (_: Exception) { return@collect }
-                        val mi = messages.indexOfFirst { it.info.id == p["messageID"]?.jsonPrimitive?.content }
-                        if (mi >= 0) {
-                        val mp = messages[mi].parts.toMutableList()
-                        val pi = mp.indexOfFirst { it.id == part.id }
-                        if (pi >= 0) mp[pi] = part else mp.add(part)
-                        messages[mi] = LegacyWithParts(messages[mi].info, mp)
-                    }
-                    }
-                    "message.updated" -> {
-                        val infoJson = props["info"]?.jsonObject ?: return@collect
-                        val info = try { Json { ignoreUnknownKeys = true; coerceInputValues = true }.decodeFromJsonElement(LegacyInfo.serializer(), infoJson) } catch (_: Exception) { return@collect }
-                        val mi = messages.indexOfFirst { it.info.id == info.id }
-                        if (mi >= 0) messages[mi] = LegacyWithParts(info, messages[mi].parts) else { println("OC_DBG: message.updated adding new role=${info.role} id=${info.id}"); messages.add(LegacyWithParts(info)) }
-                    }
-                    "session.status" -> { println("OC_DBG: session.status $sid"); isRunning = true }
-                    "session.idle" -> {
-                        println("OC_DBG: session.idle $sid, msgs before=${messages.size}")
-                        isRunning = false
-                        api.getSessionMessages(sessionId).onSuccess { fresh ->
-                            messages.removeAll { !it.info.id.startsWith("evt_") }
-                            fresh.forEach { f -> if (messages.none { m -> m.info.id == f.info.id }) messages.add(f) }
-                            println("OC_DBG: session.idle done, msgs after=${messages.size}")
-                        }
-                    }
-                    "session.updated" -> {
-                        val infoJson = props["info"]?.jsonObject ?: return@collect
-                        currentTitle = infoJson["title"]?.jsonPrimitive?.contentOrNull ?: currentTitle
-                        try {
-                            sessionTokens = Json { ignoreUnknownKeys = true; coerceInputValues = true }.decodeFromJsonElement(SessionTokens.serializer(), infoJson["tokens"] ?: return@collect)
-                        } catch (_: Exception) {}
-                        sessionCost = infoJson["cost"]?.jsonPrimitive?.contentOrNull?.toDoubleOrNull()
-                    }
-                    "permission.asked" -> {
-                        println("OC_DBG: permission.asked props=$props")
-                        val id = props["id"]?.jsonPrimitive?.content ?: return@collect
-                        val permission = props["permission"]?.jsonPrimitive?.content ?: ""
-                        val patterns = props["patterns"]?.jsonArray?.mapNotNull { it.jsonPrimitive.contentOrNull } ?: emptyList()
-                        val always = props["always"]?.jsonArray?.mapNotNull { it.jsonPrimitive.contentOrNull } ?: emptyList()
-                        val toolJson = props["tool"]?.jsonObject
-                        val tool = toolJson?.let {
-                            PermissionRequest(
-                                id = id, sessionID = sid, permission = permission,
-                                patterns = patterns, always = always,
-                                tool = page.dera.opencode.api.PermissionToolRef(
-                                    messageID = it["messageID"]?.jsonPrimitive?.content ?: "",
-                                    callID = it["callID"]?.jsonPrimitive?.content ?: ""
-                                )
-                            )
-                        } ?: PermissionRequest(id = id, sessionID = sid, permission = permission, patterns = patterns, always = always)
-                        if (permissionRequests.none { it.id == id }) permissionRequests.add(tool)
-                    }
-                    "permission.replied" -> {
-                        val rid = props["requestID"]?.jsonPrimitive?.content ?: return@collect
-                        println("OC_DBG: permission.replied requestID=$rid")
-                        permissionRequests.removeAll { it.id == rid }
-                    }
-                    "question.asked" -> {
-                        val id = props["id"]?.jsonPrimitive?.content ?: return@collect
-                        val qlist = mutableListOf<QuestionInfo>()
-                        props["questions"]?.jsonArray?.forEach { qj ->
-                            val obj = qj.jsonObject
-                            val opts = mutableListOf<QuestionOption>()
-                            obj["options"]?.jsonArray?.forEach { oj ->
-                                val oo = oj.jsonObject
-                                opts.add(QuestionOption(
-                                    label = oo["label"]?.jsonPrimitive?.content ?: "",
-                                    description = oo["description"]?.jsonPrimitive?.content ?: ""
-                                ))
-                            }
-                            qlist.add(QuestionInfo(
-                                question = obj["question"]?.jsonPrimitive?.content ?: "",
-                                header = obj["header"]?.jsonPrimitive?.content ?: "",
-                                options = opts,
-                                multiple = obj["multiple"]?.jsonPrimitive?.content?.toBooleanStrictOrNull() ?: false,
-                                custom = obj["custom"]?.jsonPrimitive?.content?.toBooleanStrictOrNull() ?: true
-                            ))
-                        }
-                        val tool = props["tool"]?.jsonObject?.let {
-                            QuestionToolRef(
-                                messageID = it["messageID"]?.jsonPrimitive?.content ?: "",
-                                callID = it["callID"]?.jsonPrimitive?.content ?: ""
-                            )
-                        }
-                        val req = QuestionRequest(id = id, sessionID = sid, questions = qlist, tool = tool)
-                        if (questionRequests.none { it.id == id }) questionRequests.add(req)
-                    }
-                    "question.replied" -> {
-                        val rid = props["requestID"]?.jsonPrimitive?.content ?: return@collect
-                        println("OC_DBG: question.replied requestID=$rid")
-                        questionRequests.removeAll { it.id == rid }
-                    }
-                    "question.rejected" -> {
-                        val rid = props["requestID"]?.jsonPrimitive?.content ?: return@collect
-                        println("OC_DBG: question.rejected requestID=$rid")
-                        questionRequests.removeAll { it.id == rid }
-                    }
-                    "session.diff" -> {
-                        val diff = props["diff"]?.jsonArray
-                        if (diff != null && diff.isEmpty()) return@collect
-                        val rawId = "evt_${event.payload?.type ?: "unknown"}_${kotlin.random.Random.nextLong().toString(36)}"
-                        val display = event.payload?.properties?.toString() ?: "{}"
-                        println("OC_DBG: session.diff props=$display")
-                        if (messages.none { it.info.id == rawId }) {
-                            messages.add(LegacyWithParts(
-                                LegacyInfo(id = rawId, sessionID = sessionId, role = "system"),
-                                listOf(LegacyPart(id = rawId, sessionID = sessionId, messageID = rawId, type = "text", text = "[${event.payload?.type ?: "unknown"}] $display"))
-                            ))
+                        pendingDeltas.getOrPut(k) { StringBuilder() }.append(props["delta"]?.jsonPrimitive?.content ?: "")
+                        flushJob?.cancel()
+                        flushJob = launch {
+                            delay(16)
+                            flushDeltas()
+                            flushJob = null
                         }
                     }
                     else -> {
-                        val rawId = "evt_${event.payload?.type ?: "unknown"}_${kotlin.random.Random.nextLong().toString(36)}"
-                        val display = event.payload?.properties?.toString() ?: "{}"
-                        println("OC_DBG: unhandled event type=${event.payload?.type} props=$display")
-                        if (messages.none { it.info.id == rawId }) {
-                            messages.add(LegacyWithParts(
-                                LegacyInfo(id = rawId, sessionID = sessionId, role = "system"),
-                                listOf(LegacyPart(id = rawId, sessionID = sessionId, messageID = rawId, type = "text", text = "[${event.payload?.type ?: "unknown"}] $display"))
-                            ))
+                        flushDeltas()
+                        flushJob?.cancel()
+                        flushJob = null
+                        when (evType) {
+                            "message.part.updated" -> {
+                            val p = props["part"]?.jsonObject ?: return@collect
+                            val k = "${p["messageID"]?.jsonPrimitive?.content}:${p["id"]?.jsonPrimitive?.content}"
+                            streamingText.remove(k)
+                            val part = try { Json { ignoreUnknownKeys = true; coerceInputValues = true }.decodeFromJsonElement(LegacyPart.serializer(), p) } catch (_: Exception) { return@collect }
+                            val mi = messages.indexOfFirst { it.info.id == p["messageID"]?.jsonPrimitive?.content }
+                            if (mi >= 0) {
+                            val mp = messages[mi].parts.toMutableList()
+                            val pi = mp.indexOfFirst { it.id == part.id }
+                            if (pi >= 0) mp[pi] = part else mp.add(part)
+                            messages[mi] = LegacyWithParts(messages[mi].info, mp)
+                        }
+                        }
+                        "message.updated" -> {
+                            val infoJson = props["info"]?.jsonObject ?: return@collect
+                            val info = try { Json { ignoreUnknownKeys = true; coerceInputValues = true }.decodeFromJsonElement(LegacyInfo.serializer(), infoJson) } catch (_: Exception) { return@collect }
+                            val mi = messages.indexOfFirst { it.info.id == info.id }
+                            if (mi >= 0) messages[mi] = LegacyWithParts(info, messages[mi].parts) else { println("OC_DBG: message.updated adding new role=${info.role} id=${info.id}"); messages.add(LegacyWithParts(info)) }
+                        }
+                        "session.status" -> { println("OC_DBG: session.status $sid"); isRunning = true }
+                        "session.idle" -> {
+                            println("OC_DBG: session.idle $sid, msgs before=${messages.size}")
+                            isRunning = false
+                            api.getSessionMessages(sessionId).onSuccess { fresh ->
+                                messages.removeAll { !it.info.id.startsWith("evt_") }
+                                fresh.forEach { f -> if (messages.none { m -> m.info.id == f.info.id }) messages.add(f) }
+                                println("OC_DBG: session.idle done, msgs after=${messages.size}")
+                            }
+                        }
+                        "session.updated" -> {
+                            val infoJson = props["info"]?.jsonObject ?: return@collect
+                            currentTitle = infoJson["title"]?.jsonPrimitive?.contentOrNull ?: currentTitle
+                            try {
+                                sessionTokens = Json { ignoreUnknownKeys = true; coerceInputValues = true }.decodeFromJsonElement(SessionTokens.serializer(), infoJson["tokens"] ?: return@collect)
+                            } catch (_: Exception) {}
+                            sessionCost = infoJson["cost"]?.jsonPrimitive?.contentOrNull?.toDoubleOrNull()
+                        }
+                        "permission.asked" -> {
+                            println("OC_DBG: permission.asked props=$props")
+                            val id = props["id"]?.jsonPrimitive?.content ?: return@collect
+                            val permission = props["permission"]?.jsonPrimitive?.content ?: ""
+                            val patterns = props["patterns"]?.jsonArray?.mapNotNull { it.jsonPrimitive.contentOrNull } ?: emptyList()
+                            val always = props["always"]?.jsonArray?.mapNotNull { it.jsonPrimitive.contentOrNull } ?: emptyList()
+                            val toolJson = props["tool"]?.jsonObject
+                            val tool = toolJson?.let {
+                                PermissionRequest(
+                                    id = id, sessionID = sid, permission = permission,
+                                    patterns = patterns, always = always,
+                                    tool = page.dera.opencode.api.PermissionToolRef(
+                                        messageID = it["messageID"]?.jsonPrimitive?.content ?: "",
+                                        callID = it["callID"]?.jsonPrimitive?.content ?: ""
+                                    )
+                                )
+                            } ?: PermissionRequest(id = id, sessionID = sid, permission = permission, patterns = patterns, always = always)
+                            if (permissionRequests.none { it.id == id }) permissionRequests.add(tool)
+                        }
+                        "permission.replied" -> {
+                            val rid = props["requestID"]?.jsonPrimitive?.content ?: return@collect
+                            println("OC_DBG: permission.replied requestID=$rid")
+                            permissionRequests.removeAll { it.id == rid }
+                        }
+                        "question.asked" -> {
+                            val id = props["id"]?.jsonPrimitive?.content ?: return@collect
+                            val qlist = mutableListOf<QuestionInfo>()
+                            props["questions"]?.jsonArray?.forEach { qj ->
+                                val obj = qj.jsonObject
+                                val opts = mutableListOf<QuestionOption>()
+                                obj["options"]?.jsonArray?.forEach { oj ->
+                                    val oo = oj.jsonObject
+                                    opts.add(QuestionOption(
+                                        label = oo["label"]?.jsonPrimitive?.content ?: "",
+                                        description = oo["description"]?.jsonPrimitive?.content ?: ""
+                                    ))
+                                }
+                                qlist.add(QuestionInfo(
+                                    question = obj["question"]?.jsonPrimitive?.content ?: "",
+                                    header = obj["header"]?.jsonPrimitive?.content ?: "",
+                                    options = opts,
+                                    multiple = obj["multiple"]?.jsonPrimitive?.content?.toBooleanStrictOrNull() ?: false,
+                                    custom = obj["custom"]?.jsonPrimitive?.content?.toBooleanStrictOrNull() ?: true
+                                ))
+                            }
+                            val tool = props["tool"]?.jsonObject?.let {
+                                QuestionToolRef(
+                                    messageID = it["messageID"]?.jsonPrimitive?.content ?: "",
+                                    callID = it["callID"]?.jsonPrimitive?.content ?: ""
+                                )
+                            }
+                            val req = QuestionRequest(id = id, sessionID = sid, questions = qlist, tool = tool)
+                            if (questionRequests.none { it.id == id }) questionRequests.add(req)
+                        }
+                        "question.replied" -> {
+                            val rid = props["requestID"]?.jsonPrimitive?.content ?: return@collect
+                            println("OC_DBG: question.replied requestID=$rid")
+                            questionRequests.removeAll { it.id == rid }
+                        }
+                        "question.rejected" -> {
+                            val rid = props["requestID"]?.jsonPrimitive?.content ?: return@collect
+                            println("OC_DBG: question.rejected requestID=$rid")
+                            questionRequests.removeAll { it.id == rid }
+                        }
+                        "session.diff" -> {
+                            val diff = props["diff"]?.jsonArray
+                            if (diff != null && diff.isEmpty()) return@collect
+                            val rawId = "evt_${event.payload?.type ?: "unknown"}_${kotlin.random.Random.nextLong().toString(36)}"
+                            val display = event.payload?.properties?.toString() ?: "{}"
+                            println("OC_DBG: session.diff props=$display")
+                            if (messages.none { it.info.id == rawId }) {
+                                messages.add(LegacyWithParts(
+                                    LegacyInfo(id = rawId, sessionID = sessionId, role = "system"),
+                                    listOf(LegacyPart(id = rawId, sessionID = sessionId, messageID = rawId, type = "text", text = "[${event.payload?.type ?: "unknown"}] $display"))
+                                ))
+                            }
+                        }
+                        else -> {
+                            val rawId = "evt_${event.payload?.type ?: "unknown"}_${kotlin.random.Random.nextLong().toString(36)}"
+                            val display = event.payload?.properties?.toString() ?: "{}"
+                            println("OC_DBG: unhandled event type=${event.payload?.type} props=$display")
+                            if (messages.none { it.info.id == rawId }) {
+                                messages.add(LegacyWithParts(
+                                    LegacyInfo(id = rawId, sessionID = sessionId, role = "system"),
+                                    listOf(LegacyPart(id = rawId, sessionID = sessionId, messageID = rawId, type = "text", text = "[${event.payload?.type ?: "unknown"}] $display"))
+                                ))
+                            }
+                        }
                         }
                     }
                 }
@@ -426,15 +451,21 @@ fun SessionDetailScreen(api: OpencodeApi, sessionId: String, sessionTitle: Strin
                 Box(Modifier.weight(1f).fillMaxWidth()) {
                     if (messages.isEmpty() && !isLoading) Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) { Text(sessionTitle.ifEmpty { "Session" }, style = MaterialTheme.typography.headlineSmall) }
                     else {
-                        LazyColumn(state = listState, modifier = Modifier.fillMaxSize(), verticalArrangement = Arrangement.spacedBy(0.dp), contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = 12.dp, vertical = 8.dp)) {
-                            itemsIndexed(messages) { _, msg -> MessageCard(msg, streamingText, streamVersion, projectRoot) }
-                            if (isSending || isRunning) item { SendingIndicator() }
+                        Column(modifier = Modifier.fillMaxSize().verticalScroll(scrollState)) {
+                            Column(Modifier.padding(horizontal = 12.dp, vertical = 8.dp)) {
+                                messages.forEachIndexed { idx, msg ->
+                                    key(msg.info.id) {
+                                        MessageCard(msg, streamingText, projectRoot)
+                                    }
+                                }
+                                if (isSending || isRunning) SendingIndicator()
+                            }
                         }
                     }
                 }
                 if (permissionRequests.isNotEmpty() || questionRequests.isNotEmpty()) {
-                    val scrollState = rememberScrollState()
-                    Box(Modifier.fillMaxWidth().heightIn(max = 400.dp).verticalScroll(scrollState)) {
+                    val permScrollState = rememberScrollState()
+                    Box(Modifier.fillMaxWidth().heightIn(max = 400.dp).verticalScroll(permScrollState)) {
                         Column(Modifier.fillMaxWidth()) {
                             permissionRequests.forEach { req -> PermissionPrompt(req, api, sessionId, directory, projectRoot) }
                             questionRequests.forEach { req -> QuestionPrompt(req, api, sessionId, directory) }
@@ -516,8 +547,7 @@ private fun SendingIndicator() {
     }
 }
 
-@Composable private fun ReasoningPart(part: LegacyPart, streamingText: Map<String, String>, streamVersion: Int) {
-    streamVersion
+@Composable private fun ReasoningPart(part: LegacyPart, streamingText: Map<String, String>) {
     val key = "${part.messageID}:${part.id}"
     val isStreaming = streamingText.containsKey(key)
     val t = streamingText[key] ?: (part.text ?: "")
@@ -796,8 +826,7 @@ private fun QuestionPrompt(req: QuestionRequest, api: OpencodeApi, sessionId: St
 }
 
 @Composable
-private fun MessageCard(msg: LegacyWithParts, streamingText: Map<String, String>, streamVersion: Int, projectRoot: String) {
-    streamVersion
+private fun MessageCard(msg: LegacyWithParts, streamingText: Map<String, String>, projectRoot: String) {
     val parts = msg.parts.filter { it.type !in listOf("step-start", "step-finish", "snapshot", "patch") }
     when (msg.info.role) {
         "user" -> Row(
@@ -821,7 +850,7 @@ private fun MessageCard(msg: LegacyWithParts, streamingText: Map<String, String>
                 }
             }
         }
-        "assistant" -> AssistantCard(msg.info, parts, streamingText, streamVersion, projectRoot)
+        "assistant" -> AssistantCard(msg.info, parts, streamingText, projectRoot)
         else -> Box(
             Modifier.fillMaxWidth().padding(vertical = 2.dp),
             contentAlignment = Alignment.Center,
@@ -849,8 +878,7 @@ private fun MessageCard(msg: LegacyWithParts, streamingText: Map<String, String>
 }
 
 @Composable
-private fun AssistantCard(info: LegacyInfo, parts: List<LegacyPart>, streamingText: Map<String, String>, streamVersion: Int, projectRoot: String) {
-    streamVersion
+private fun AssistantCard(info: LegacyInfo, parts: List<LegacyPart>, streamingText: Map<String, String>, projectRoot: String) {
     Column(Modifier.fillMaxWidth().padding(start = 8.dp)) {
         if (info.error != null) {
             Box(
@@ -879,17 +907,16 @@ private fun AssistantCard(info: LegacyInfo, parts: List<LegacyPart>, streamingTe
                 }
             }
         }
-        parts.forEach { PartContent(it, streamingText, streamVersion, projectRoot) }
+        parts.forEach { PartContent(it, streamingText, projectRoot) }
     }
 }
 
 @Composable
-private fun PartContent(part: LegacyPart, streamingText: Map<String, String>, streamVersion: Int, projectRoot: String) {
-    streamVersion
+private fun PartContent(part: LegacyPart, streamingText: Map<String, String>, projectRoot: String) {
     when (part.type) {
         "text" -> {
             val t = (streamingText["${part.messageID}:${part.id}"] ?: (part.text ?: "")).trimEnd()
-            val md = rememberMarkdownState(t, retainState = true)
+            val hasMd = t.any { it in markdownChars }
             Box(
                 Modifier
                     .widthIn(max = 360.dp)
@@ -898,11 +925,15 @@ private fun PartContent(part: LegacyPart, streamingText: Map<String, String>, st
                     .padding(12.dp),
             ) {
                 SelectionContainer {
-                    Markdown(md)
+                    if (hasMd) {
+                        Markdown(rememberMarkdownState(t, retainState = true))
+                    } else {
+                        Text(t, style = MaterialTheme.typography.bodyMedium)
+                    }
                 }
             }
         }
-        "reasoning" -> ReasoningPart(part, streamingText, streamVersion)
+        "reasoning" -> ReasoningPart(part, streamingText)
         "tool" -> ToolPart(part, projectRoot)
         "compaction" -> Box(
             Modifier.fillMaxWidth(),
@@ -944,10 +975,10 @@ private fun ToolPart(part: LegacyPart, projectRoot: String) {
         "error" -> MaterialTheme.colorScheme.error
         else -> MaterialTheme.colorScheme.outline
     }
-    val label = toolLabel(part, projectRoot)
-    val matchSuffix = matchCount(part)
+    val label = remember(part) { toolLabel(part, projectRoot) }
+    val matchSuffix = remember(part) { matchCount(part) }
     if (part.tool == "task") {
-        val desc = taskDescription(part)
+        val desc = remember(part) { taskDescription(part) }
         Row(
             Modifier
                 .padding(vertical = 2.dp)
@@ -1019,9 +1050,10 @@ private fun ToolPart(part: LegacyPart, projectRoot: String) {
     } else {
         var expanded by remember { mutableStateOf(false) }
         val isExpandable = part.tool in setOf("websearch", "webfetch", "question", "invalid", "read", "write", "edit")
+        val isDirectory = remember(part) { isDirectoryRead(part) }
         val icon = when {
             part.tool == "invalid" -> circleXIcon
-            part.tool == "read" && isDirectoryRead(part) -> Res.drawable.folder
+            part.tool == "read" && isDirectory -> Res.drawable.folder
             part.tool in listOf("glob", "grep") -> searchIcon
             part.tool == "question" -> circleQuestionMarkIcon
             part.tool in listOf("websearch", "webfetch") -> globeIcon
@@ -1084,9 +1116,8 @@ private fun ToolPart(part: LegacyPart, projectRoot: String) {
                             null -> null
                         }
                         if (inputObj != null) {
-                            val pretty = Json { prettyPrint = true }
                             Text(
-                                pretty.encodeToString(JsonElement.serializer(), inputObj),
+                                prettyJson.encodeToString(JsonElement.serializer(), inputObj),
                                 style = MaterialTheme.typography.bodySmall,
                                 fontFamily = FontFamily.Monospace,
                                 color = MaterialTheme.colorScheme.onSurfaceVariant,
@@ -1167,7 +1198,7 @@ private fun toolLabel(part: LegacyPart, projectRoot: String): String {
         } ?: "websearch"
         "webfetch" -> obj["url"]?.toString()?.removeSurrounding("\"").let {
             val host = it?.let { url ->
-                Regex("://([^/]+)").find(url)?.groupValues?.get(1)
+                urlHostRegex.find(url)?.groupValues?.get(1)
             } ?: it
             if (host != null && host.length > 40) host.take(40) + "..." else host
         } ?: "webfetch"
