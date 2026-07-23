@@ -65,6 +65,8 @@ kotlin {
             implementation(libs.kotlinx.datetime)
             implementation(libs.multiplatform.markdown.renderer)
             implementation(libs.multiplatform.markdown.renderer.m3)
+            implementation(libs.commonmark)
+            implementation(libs.commonmark.ext.gfm.tables)
         }
         iosMain.dependencies {
             implementation(libs.ktor.client.darwin)

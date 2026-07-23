@@ -19,8 +19,13 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
+import androidx.compose.foundation.horizontalScroll
+import androidx.compose.foundation.border
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
+import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardActions
@@ -50,6 +55,7 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
+import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.focus.FocusRequester
@@ -58,12 +64,20 @@ import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.painter.Painter
+import androidx.compose.ui.text.AnnotatedString
+import androidx.compose.ui.text.SpanStyle
+import androidx.compose.ui.text.buildAnnotatedString
 import androidx.compose.ui.text.font.FontFamily
+import androidx.compose.ui.text.font.FontStyle
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.ImeAction
+import androidx.compose.ui.text.style.TextDecoration
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.unit.dp
-import kotlin.time.Clock
+import androidx.compose.ui.unit.sp
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
@@ -88,6 +102,30 @@ import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
 import com.mikepenz.markdown.m3.Markdown
 import com.mikepenz.markdown.model.rememberMarkdownState
+import org.commonmark.parser.Parser
+import org.commonmark.node.BlockQuote
+import org.commonmark.node.BulletList
+import org.commonmark.node.Code
+import org.commonmark.node.Emphasis
+import org.commonmark.node.HardLineBreak
+import org.commonmark.node.Heading
+import org.commonmark.node.Link
+import org.commonmark.node.ListItem
+import org.commonmark.node.Node
+import org.commonmark.node.OrderedList
+import org.commonmark.node.Paragraph
+import org.commonmark.node.SoftLineBreak
+import org.commonmark.node.StrongEmphasis
+import org.commonmark.node.Text as CommonMarkText
+import org.commonmark.node.FencedCodeBlock
+import org.commonmark.node.IndentedCodeBlock
+import org.commonmark.node.ThematicBreak
+import org.commonmark.ext.gfm.tables.TablesExtension
+import org.commonmark.ext.gfm.tables.TableBlock
+import org.commonmark.ext.gfm.tables.TableHead
+import org.commonmark.ext.gfm.tables.TableBody
+import org.commonmark.ext.gfm.tables.TableRow
+import org.commonmark.ext.gfm.tables.TableCell
 import opencodeapp.shared.generated.resources.globeIcon
 import opencodeapp.shared.generated.resources.searchIcon
 import opencodeapp.shared.generated.resources.sendIcon
@@ -113,13 +151,470 @@ import org.jetbrains.compose.resources.painterResource
 
 private val prettyJson = Json { prettyPrint = true }
 private val urlHostRegex = Regex("://([^/]+)")
-private val markdownChars = setOf('#', '`', '[', '|')
+
+private val commonmarkParser = Parser.builder()
+    .extensions(listOf(TablesExtension.create()))
+    .build()
+
+private fun parseCommonMarkToAnnotatedString(
+    markdown: String,
+    codeBg: Color,
+    linkColor: Color,
+    quoteColor: Color
+): AnnotatedString {
+    val document = commonmarkParser.parse(markdown)
+    return buildAnnotatedString {
+        renderCommonMarkNode(document, codeBg, linkColor, quoteColor, isInsideListItem = false)
+    }
+}
+
+private fun AnnotatedString.Builder.endsWithNewline(): Boolean {
+    val t = toAnnotatedString().text
+    return t.isEmpty() || t.endsWith('\n')
+}
+
+private fun AnnotatedString.Builder.endsWithDoubleNewline(): Boolean {
+    val t = toAnnotatedString().text
+    return t.endsWith("\n\n")
+}
+
+private fun collectTextContent(node: Node, sb: StringBuilder) {
+    var child = node.firstChild
+    while (child != null) {
+        if (child is CommonMarkText) {
+            sb.append(child.literal)
+        } else if (child is Code) {
+            sb.append(child.literal)
+        } else {
+            collectTextContent(child, sb)
+        }
+        child = child.next
+    }
+}
+
+private fun AnnotatedString.Builder.renderCommonMarkNode(
+    node: Node,
+    codeBg: Color,
+    linkColor: Color,
+    quoteColor: Color,
+    isInsideListItem: Boolean = false
+) {
+    when (node) {
+        is Paragraph -> {
+            if (!isInsideListItem) {
+                if (length > 0 && !endsWithNewline()) append("\n")
+                renderChildren(node, codeBg, linkColor, quoteColor, isInsideListItem = false)
+                append("\n\n")
+            } else {
+                renderChildren(node, codeBg, linkColor, quoteColor, isInsideListItem = true)
+            }
+        }
+        is Heading -> {
+            if (length > 0) {
+                if (!endsWithNewline()) append("\n\n") else if (!endsWithDoubleNewline()) append("\n")
+            }
+            val start = length
+            renderChildren(node, codeBg, linkColor, quoteColor, isInsideListItem)
+            val fontSize = when (node.level) {
+                1 -> 20.sp
+                2 -> 18.sp
+                else -> 16.sp
+            }
+            addStyle(SpanStyle(fontWeight = FontWeight.Bold, fontSize = fontSize), start, length)
+            append("\n\n")
+        }
+        is CommonMarkText -> {
+            append(node.literal)
+        }
+        is StrongEmphasis -> {
+            val start = length
+            renderChildren(node, codeBg, linkColor, quoteColor, isInsideListItem)
+            addStyle(SpanStyle(fontWeight = FontWeight.Bold), start, length)
+        }
+        is Emphasis -> {
+            val start = length
+            renderChildren(node, codeBg, linkColor, quoteColor, isInsideListItem)
+            addStyle(SpanStyle(fontStyle = FontStyle.Italic), start, length)
+        }
+        is Code -> {
+            val start = length
+            append(node.literal)
+            addStyle(SpanStyle(fontFamily = FontFamily.Monospace, background = codeBg), start, length)
+        }
+        is Link -> {
+            val start = length
+            renderChildren(node, codeBg, linkColor, quoteColor, isInsideListItem)
+            addStyle(SpanStyle(color = linkColor, textDecoration = TextDecoration.Underline), start, length)
+        }
+        is BulletList -> {
+            if (length > 0 && !endsWithNewline()) append("\n")
+            var item = node.firstChild
+            while (item != null) {
+                if (item is ListItem) {
+                    if (length > 0 && !endsWithNewline()) append("\n")
+                    withStyle(SpanStyle(fontWeight = FontWeight.Bold, color = linkColor)) {
+                        append("• ")
+                    }
+                    renderChildren(item, codeBg, linkColor, quoteColor, isInsideListItem = true)
+                }
+                item = item.next
+            }
+            append("\n\n")
+        }
+        is OrderedList -> {
+            if (length > 0 && !endsWithNewline()) append("\n")
+            var num = node.startNumber
+            var item = node.firstChild
+            while (item != null) {
+                if (item is ListItem) {
+                    if (length > 0 && !endsWithNewline()) append("\n")
+                    withStyle(SpanStyle(fontWeight = FontWeight.Bold, color = linkColor)) {
+                        append("$num. ")
+                    }
+                    num++
+                    renderChildren(item, codeBg, linkColor, quoteColor, isInsideListItem = true)
+                }
+                item = item.next
+            }
+            append("\n\n")
+        }
+        is ListItem -> {
+            renderChildren(node, codeBg, linkColor, quoteColor, isInsideListItem = true)
+        }
+        is BlockQuote -> {
+            if (length > 0 && !endsWithNewline()) append("\n")
+            val start = length
+            renderChildren(node, codeBg, linkColor, quoteColor, isInsideListItem)
+            addStyle(SpanStyle(fontStyle = FontStyle.Italic, color = quoteColor), start, length)
+        }
+        is TableBlock -> {
+            // TableBlock is handled by MarkdownTableComposable
+        }
+        is SoftLineBreak -> {
+            append("\n")
+        }
+        is HardLineBreak -> {
+            append("\n")
+        }
+        is ThematicBreak -> {
+            if (length > 0 && !endsWithNewline()) append("\n")
+            append("───\n")
+        }
+        else -> {
+            renderChildren(node, codeBg, linkColor, quoteColor, isInsideListItem)
+        }
+    }
+}
+
+private fun AnnotatedString.Builder.renderChildren(
+    node: Node,
+    codeBg: Color,
+    linkColor: Color,
+    quoteColor: Color,
+    isInsideListItem: Boolean
+) {
+    var child = node.firstChild
+    while (child != null) {
+        val next = child.next
+        renderCommonMarkNode(child, codeBg, linkColor, quoteColor, isInsideListItem)
+        child = next
+    }
+}
+
+@Composable
+private fun MarkdownTableComposable(
+    tableBlock: TableBlock,
+    codeBg: Color,
+    linkColor: Color,
+    quoteColor: Color
+) {
+    val headerRows = remember(tableBlock) {
+        mutableListOf<List<Node>>().apply {
+            var curr = tableBlock.firstChild
+            while (curr != null) {
+                if (curr is TableHead) {
+                    var r = curr.firstChild
+                    while (r != null) {
+                        if (r is TableRow) {
+                            val cells = mutableListOf<Node>()
+                            var c = r.firstChild
+                            while (c != null) {
+                                if (c is TableCell) cells.add(c)
+                                c = c.next
+                            }
+                            add(cells)
+                        }
+                        r = r.next
+                    }
+                }
+                curr = curr.next
+            }
+        }
+    }
+    val bodyRows = remember(tableBlock) {
+        mutableListOf<List<Node>>().apply {
+            var curr = tableBlock.firstChild
+            while (curr != null) {
+                if (curr is TableBody) {
+                    var r = curr.firstChild
+                    while (r != null) {
+                        if (r is TableRow) {
+                            val cells = mutableListOf<Node>()
+                            var c = r.firstChild
+                            while (c != null) {
+                                if (c is TableCell) cells.add(c)
+                                c = c.next
+                            }
+                            add(cells)
+                        }
+                        r = r.next
+                    }
+                }
+                curr = curr.next
+            }
+        }
+    }
+
+    val numCols = remember(headerRows, bodyRows) {
+        (headerRows + bodyRows).maxOfOrNull { it.size } ?: 0
+    }
+
+    if (numCols == 0) return
+
+    val colWidthsDp = remember(headerRows, bodyRows, numCols) {
+        val allRows = headerRows + bodyRows
+        Array(numCols) { colIdx ->
+            val maxLen = allRows.maxOfOrNull { row ->
+                val cellNode = row.getOrNull(colIdx)
+                if (cellNode != null) {
+                    val sb = StringBuilder()
+                    collectTextContent(cellNode, sb)
+                    sb.length
+                } else 0
+            } ?: 0
+            (maxLen * 9f + 24f).coerceIn(100f, 260f).dp
+        }
+    }
+
+    val horizontalScrollState = rememberScrollState()
+
+    Box(
+        Modifier
+            .fillMaxWidth()
+            .padding(vertical = 6.dp)
+            .clip(RoundedCornerShape(8.dp))
+            .border(BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant), RoundedCornerShape(8.dp))
+            .background(MaterialTheme.colorScheme.surface)
+    ) {
+        Box(Modifier.horizontalScroll(horizontalScrollState)) {
+            Column {
+                headerRows.forEach { row ->
+                    Row(
+                        Modifier
+                            .background(MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.6f))
+                            .padding(vertical = 2.dp)
+                    ) {
+                        for (colIdx in 0 until numCols) {
+                            val cellNode = row.getOrNull(colIdx)
+                            val cellText = remember(cellNode) {
+                                if (cellNode != null) {
+                                    buildAnnotatedString {
+                                        renderCommonMarkNode(cellNode, codeBg, linkColor, quoteColor, true)
+                                    }
+                                } else AnnotatedString("")
+                            }
+                            Box(
+                                Modifier
+                                    .width(colWidthsDp[colIdx])
+                                    .padding(horizontal = 10.dp, vertical = 6.dp),
+                                contentAlignment = Alignment.CenterStart
+                            ) {
+                                Text(
+                                    cellText,
+                                    style = MaterialTheme.typography.bodySmall,
+                                    fontWeight = FontWeight.Bold,
+                                    color = MaterialTheme.colorScheme.onPrimaryContainer
+                                )
+                            }
+                        }
+                    }
+                }
+
+                bodyRows.forEachIndexed { rowIdx, row ->
+                    val bg = if (rowIdx % 2 == 0) MaterialTheme.colorScheme.surface else MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.35f)
+                    Row(
+                        Modifier
+                            .background(bg)
+                            .padding(vertical = 2.dp)
+                    ) {
+                        for (colIdx in 0 until numCols) {
+                            val cellNode = row.getOrNull(colIdx)
+                            val cellText = remember(cellNode) {
+                                if (cellNode != null) {
+                                    buildAnnotatedString {
+                                        renderCommonMarkNode(cellNode, codeBg, linkColor, quoteColor, true)
+                                    }
+                                } else AnnotatedString("")
+                            }
+                            Box(
+                                Modifier
+                                    .width(colWidthsDp[colIdx])
+                                    .padding(horizontal = 10.dp, vertical = 6.dp),
+                                contentAlignment = Alignment.CenterStart
+                            ) {
+                                Text(
+                                    cellText,
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = MaterialTheme.colorScheme.onSurface
+                                )
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun CodeBlockComposable(
+    code: String,
+    info: String?
+) {
+    val displayCode = remember(code) {
+        if (code.length > 3000) code.take(3000) + "\n... (truncated for preview)" else code
+    }
+    Box(
+        Modifier
+            .fillMaxWidth()
+            .padding(vertical = 4.dp)
+            .clip(RoundedCornerShape(8.dp))
+            .background(Color(0xFF1E1E2E))
+            .padding(10.dp)
+    ) {
+        Column {
+            if (!info.isNullOrBlank()) {
+                Text(
+                    info.trim(),
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.outline,
+                    modifier = Modifier.padding(bottom = 4.dp)
+                )
+            }
+            Text(
+                displayCode,
+                style = TextStyle(
+                    fontFamily = FontFamily.Monospace,
+                    fontSize = 13.sp,
+                    color = Color(0xFFCDD6F4)
+                )
+            )
+        }
+    }
+}
+
+private sealed class DocumentSegment {
+    data class TextSegment(val annotated: AnnotatedString) : DocumentSegment()
+    data class CodeSegment(val code: String, val info: String?) : DocumentSegment()
+    data class TableSegment(val block: TableBlock) : DocumentSegment()
+}
+
+private val commonmarkSegmentCache = mutableMapOf<String, List<DocumentSegment>>()
+
+@Composable
+private fun CommonMarkDocumentContent(
+    markdown: String,
+    codeBg: Color,
+    linkColor: Color,
+    quoteColor: Color,
+    textColor: Color
+) {
+    val segments = remember(markdown, codeBg, linkColor, quoteColor) {
+        val cacheKey = "${markdown.hashCode()}_${codeBg.hashCode()}_${linkColor.hashCode()}"
+        commonmarkSegmentCache.getOrPut(cacheKey) {
+            val document = commonmarkParser.parse(markdown)
+            val result = mutableListOf<DocumentSegment>()
+            var child = document.firstChild
+            var pendingBuilder: AnnotatedString.Builder? = null
+
+            fun flushText() {
+                pendingBuilder?.let { b ->
+                    var res = b.toAnnotatedString()
+                    while (res.text.endsWith('\n')) {
+                        res = res.subSequence(0, res.text.length - 1)
+                    }
+                    if (res.text.isNotBlank()) {
+                        result.add(DocumentSegment.TextSegment(res))
+                    }
+                    pendingBuilder = null
+                }
+            }
+
+            while (child != null) {
+                when (child) {
+                    is TableBlock -> {
+                        flushText()
+                        result.add(DocumentSegment.TableSegment(child))
+                    }
+                    is FencedCodeBlock -> {
+                        flushText()
+                        result.add(DocumentSegment.CodeSegment(child.literal.trimEnd(), child.info))
+                    }
+                    is IndentedCodeBlock -> {
+                        flushText()
+                        result.add(DocumentSegment.CodeSegment(child.literal.trimEnd(), null))
+                    }
+                    else -> {
+                        val b = pendingBuilder ?: AnnotatedString.Builder().also { pendingBuilder = it }
+                        b.renderCommonMarkNode(child, codeBg, linkColor, quoteColor, isInsideListItem = false)
+                    }
+                }
+                child = child.next
+            }
+            flushText()
+            result
+        }
+    }
+
+    Column {
+        segments.forEachIndexed { idx, seg ->
+            when (seg) {
+                is DocumentSegment.TextSegment -> {
+                    Text(seg.annotated, style = MaterialTheme.typography.bodyMedium, color = textColor)
+                }
+                is DocumentSegment.CodeSegment -> {
+                    CodeBlockComposable(seg.code, seg.info)
+                }
+                is DocumentSegment.TableSegment -> {
+                    MarkdownTableComposable(seg.block, codeBg, linkColor, quoteColor)
+                }
+            }
+            if (idx < segments.lastIndex) {
+                Spacer(Modifier.height(6.dp))
+            }
+        }
+    }
+}
+
+private data class ChatPainters(
+    val bot: Painter,
+    val folder: Painter,
+    val file: Painter,
+    val search: Painter,
+    val question: Painter,
+    val globe: Painter,
+    val terminal: Painter,
+    val invalid: Painter,
+    val brain: Painter,
+    val alert: Painter
+)
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun SessionDetailScreen(api: OpencodeApi, sessionId: String, sessionTitle: String, directory: String, projectRoot: String, onBack: () -> Unit, onMenuClick: (() -> Unit)? = null, onTitleChange: ((String) -> Unit)? = null) {
     val messages = remember { mutableStateListOf<LegacyWithParts>() }
-    val scrollState = rememberScrollState()
+    val listState = rememberLazyListState()
+    val displayedMessages = messages
     var inputText by remember { mutableStateOf("") }
     var isLoading by remember { mutableStateOf(true) }
     var isSending by remember { mutableStateOf(false) }
@@ -132,6 +627,20 @@ fun SessionDetailScreen(api: OpencodeApi, sessionId: String, sessionTitle: Strin
     var editTitleText by remember { mutableStateOf(currentTitle) }
     var titleWasFocused by remember { mutableStateOf(false) }
     val titleFocusRequester = remember { FocusRequester() }
+
+    val chatPainters = ChatPainters(
+        bot = painterResource(botIcon),
+        folder = painterResource(Res.drawable.folder),
+        file = painterResource(Res.drawable.file),
+        search = painterResource(searchIcon),
+        question = painterResource(circleQuestionMarkIcon),
+        globe = painterResource(globeIcon),
+        terminal = painterResource(Res.drawable.terminal),
+        invalid = painterResource(circleXIcon),
+        brain = painterResource(brainIcon),
+        alert = painterResource(Res.drawable.triangle_alert)
+    )
+    val markdownCache = remember { mutableMapOf<String, com.mikepenz.markdown.model.MarkdownState>() }
 
     LaunchedEffect(isEditingTitle) {
         if (isEditingTitle) {
@@ -153,10 +662,17 @@ fun SessionDetailScreen(api: OpencodeApi, sessionId: String, sessionTitle: Strin
         isLoading = false
     }
 
-    LaunchedEffect(messages.size) {
+    var prevMessageCount by remember { mutableStateOf(0) }
+    LaunchedEffect(messages.size, isSending, isRunning) {
         if (messages.isNotEmpty()) {
-            scrollState.scrollTo(scrollState.maxValue)
+            if (prevMessageCount == 0 || messages.size > prevMessageCount) {
+                val totalItems = messages.size + if (isSending || isRunning) 1 else 0
+                if (totalItems > 0) {
+                    listState.scrollToItem(totalItems - 1)
+                }
+            }
         }
+        prevMessageCount = messages.size
     }
 
     LaunchedEffect(sessionId, directory) {
@@ -429,11 +945,10 @@ fun SessionDetailScreen(api: OpencodeApi, sessionId: String, sessionTitle: Strin
         },
     ) { padding ->
         Box(Modifier.fillMaxSize().padding(padding)) {
-            Column(
-                Modifier.fillMaxSize()
-                    .imePadding()
-                    .then(if (selectedTab == 0) Modifier else Modifier.alpha(0f))
-            ) {
+            if (selectedTab == 0) {
+                Column(
+                    Modifier.fillMaxSize()
+                ) {
                 if (errorText != null) {
                     Box(
                         Modifier
@@ -451,16 +966,23 @@ fun SessionDetailScreen(api: OpencodeApi, sessionId: String, sessionTitle: Strin
                 Box(Modifier.weight(1f).fillMaxWidth()) {
                     if (messages.isEmpty() && !isLoading) Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) { Text(sessionTitle.ifEmpty { "Session" }, style = MaterialTheme.typography.headlineSmall) }
                     else {
-                        Column(modifier = Modifier.fillMaxSize().verticalScroll(scrollState)) {
-                            Column(Modifier.padding(horizontal = 12.dp, vertical = 8.dp)) {
-                                messages.forEachIndexed { idx, msg ->
-                                    key(msg.info.id) {
-                                        MessageCard(msg, streamingText, projectRoot)
+                        LazyColumn(
+                            state = listState,
+                            modifier = Modifier.fillMaxSize().padding(horizontal = 12.dp)
+                        ) {
+                                items(
+                                    items = displayedMessages,
+                                    key = { it.info.id },
+                                    contentType = { it.info.role }
+                                ) { msg ->
+                                    MessageCard(msg, streamingText, projectRoot, chatPainters, markdownCache)
+                                }
+                                if (isSending || isRunning) {
+                                    item(key = "sending_indicator", contentType = "indicator") {
+                                        SendingIndicator()
                                     }
                                 }
-                                if (isSending || isRunning) SendingIndicator()
                             }
-                        }
                     }
                 }
                 if (permissionRequests.isNotEmpty() || questionRequests.isNotEmpty()) {
@@ -490,7 +1012,7 @@ fun SessionDetailScreen(api: OpencodeApi, sessionId: String, sessionTitle: Strin
                         }
                     }
                 }
-                Row(Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 8.dp), verticalAlignment = Alignment.Bottom) {
+                Row(Modifier.fillMaxWidth().imePadding().padding(horizontal = 12.dp, vertical = 8.dp), verticalAlignment = Alignment.Bottom) {
                     OutlinedTextField(
                         value = inputText, onValueChange = { inputText = it }, modifier = Modifier.weight(1f),
                         placeholder = { Text("Type a message...") }, maxLines = 4,
@@ -508,7 +1030,7 @@ fun SessionDetailScreen(api: OpencodeApi, sessionId: String, sessionTitle: Strin
                             .clickable(enabled = inputText.isNotBlank() && !isSending) { doSend() }
                     )
                 }
-            }
+                }}
             if (selectedTab != 0) {
                 Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
                     Text(
@@ -547,35 +1069,27 @@ private fun SendingIndicator() {
     }
 }
 
-@Composable private fun ReasoningPart(part: LegacyPart, streamingText: Map<String, String>) {
-    val key = "${part.messageID}:${part.id}"
+@Composable private fun ReasoningPart(part: LegacyPart, streamingText: Map<String, String>, chatPainters: ChatPainters) {
+    val key = remember(part.messageID, part.id) { "${part.messageID}:${part.id}" }
     val isStreaming = streamingText.containsKey(key)
-    val t = streamingText[key] ?: (part.text ?: "")
+    val t = remember(streamingText[key], part.text) { streamingText[key] ?: (part.text ?: "") }
     var expanded by remember { mutableStateOf(false) }
-    val startTimes = remember { mutableStateMapOf<String, Long>() }
-    val finalDurations = remember { mutableStateMapOf<String, String>() }
-    if (isStreaming && !startTimes.containsKey(key)) {
-        startTimes[key] = Clock.System.now().toEpochMilliseconds()
-        finalDurations.remove(key)
+    val headerText = remember(isStreaming) {
+        if (isStreaming) "Thinking..." else "Thought"
     }
-    val startTime = startTimes[key]
-    if (!isStreaming && startTime != null && !finalDurations.containsKey(key)) {
-        val totalMs = Clock.System.now().toEpochMilliseconds() - startTime
-        finalDurations[key] = if (totalMs < 1000) "Thought for ${totalMs}ms"
-        else "Thought for ${thinkingDurationSeconds(totalMs)}"
-    }
-    val headerText = if (isStreaming) {
-        val elapsed = startTime?.let { Clock.System.now().toEpochMilliseconds() - it } ?: 0
-        if (elapsed < 1000) "Thinking for ${elapsed}ms" else "Thinking for ${thinkingDurationText(elapsed)}s"
-    } else finalDurations[key] ?: "Thought"
-    Row(Modifier.fillMaxWidth().padding(vertical = 2.dp).clickable { expanded = !expanded }, verticalAlignment = Alignment.CenterVertically) {
-        Image(painterResource(brainIcon), null, Modifier.size(14.dp))
+    Row(
+        Modifier.fillMaxWidth().padding(vertical = 2.dp).clickable { expanded = !expanded },
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        Image(chatPainters.brain, null, Modifier.size(14.dp))
         Spacer(Modifier.width(4.dp))
         Text(headerText, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
     }
     if (expanded && t.isNotBlank()) {
-        Box(Modifier.fillMaxWidth().padding(vertical = 2.dp).clip(RoundedCornerShape(8.dp))
-            .background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = .5f)).padding(8.dp)) {
+        Box(
+            Modifier.fillMaxWidth().padding(vertical = 2.dp).clip(RoundedCornerShape(8.dp))
+                .background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = .5f)).padding(8.dp)
+        ) {
             Text(t, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
         }
     }
@@ -826,21 +1340,21 @@ private fun QuestionPrompt(req: QuestionRequest, api: OpencodeApi, sessionId: St
 }
 
 @Composable
-private fun MessageCard(msg: LegacyWithParts, streamingText: Map<String, String>, projectRoot: String) {
-    val parts = msg.parts.filter { it.type !in listOf("step-start", "step-finish", "snapshot", "patch") }
+private fun MessageCard(msg: LegacyWithParts, streamingText: Map<String, String>, projectRoot: String, chatPainters: ChatPainters, markdownCache: MutableMap<String, com.mikepenz.markdown.model.MarkdownState>) {
+    val parts = remember(msg.parts) { msg.parts.filter { it.type !in listOf("step-start", "step-finish", "snapshot", "patch") } }
     when (msg.info.role) {
         "user" -> Row(
             Modifier.fillMaxWidth().padding(top = 8.dp, bottom = 2.dp),
             horizontalArrangement = Arrangement.End,
         ) {
-            Column(
-                Modifier
-                    .widthIn(max = 320.dp)
-                    .clip(RoundedCornerShape(16.dp, 4.dp, 16.dp, 16.dp))
-                    .background(MaterialTheme.colorScheme.primaryContainer)
-                    .padding(12.dp),
-            ) {
-                SelectionContainer {
+            SelectionContainer {
+                Column(
+                    Modifier
+                        .widthIn(max = 320.dp)
+                        .clip(RoundedCornerShape(16.dp, 4.dp, 16.dp, 16.dp))
+                        .background(MaterialTheme.colorScheme.primaryContainer)
+                        .padding(12.dp),
+                ) {
                     Text(
                         parts.filter { it.type == "text" }.joinToString("\n") { it.text ?: "" }
                             .ifEmpty { "Sent a message" },
@@ -850,7 +1364,7 @@ private fun MessageCard(msg: LegacyWithParts, streamingText: Map<String, String>
                 }
             }
         }
-        "assistant" -> AssistantCard(msg.info, parts, streamingText, projectRoot)
+        "assistant" -> AssistantCard(msg.info, parts, streamingText, projectRoot, chatPainters, markdownCache)
         else -> Box(
             Modifier.fillMaxWidth().padding(vertical = 2.dp),
             contentAlignment = Alignment.Center,
@@ -878,7 +1392,7 @@ private fun MessageCard(msg: LegacyWithParts, streamingText: Map<String, String>
 }
 
 @Composable
-private fun AssistantCard(info: LegacyInfo, parts: List<LegacyPart>, streamingText: Map<String, String>, projectRoot: String) {
+private fun AssistantCard(info: LegacyInfo, parts: List<LegacyPart>, streamingText: Map<String, String>, projectRoot: String, chatPainters: ChatPainters, markdownCache: MutableMap<String, com.mikepenz.markdown.model.MarkdownState>) {
     Column(Modifier.fillMaxWidth().padding(start = 8.dp)) {
         if (info.error != null) {
             Box(
@@ -889,7 +1403,7 @@ private fun AssistantCard(info: LegacyInfo, parts: List<LegacyPart>, streamingTe
                     .padding(14.dp),
             ) {
                 Row(verticalAlignment = Alignment.Top) {
-                    Image(painterResource(Res.drawable.triangle_alert), null, Modifier.size(22.dp))
+                    Image(chatPainters.alert, null, Modifier.size(22.dp))
                     Spacer(Modifier.width(10.dp))
                     Column {
                         Text(
@@ -907,16 +1421,25 @@ private fun AssistantCard(info: LegacyInfo, parts: List<LegacyPart>, streamingTe
                 }
             }
         }
-        parts.forEach { PartContent(it, streamingText, projectRoot) }
+        parts.forEach { part ->
+            key(part.id) {
+                PartContent(part, streamingText, projectRoot, chatPainters, markdownCache)
+            }
+        }
     }
 }
 
 @Composable
-private fun PartContent(part: LegacyPart, streamingText: Map<String, String>, projectRoot: String) {
+private fun PartContent(part: LegacyPart, streamingText: Map<String, String>, projectRoot: String, chatPainters: ChatPainters, markdownCache: MutableMap<String, com.mikepenz.markdown.model.MarkdownState>) {
     when (part.type) {
         "text" -> {
-            val t = (streamingText["${part.messageID}:${part.id}"] ?: (part.text ?: "")).trimEnd()
-            val hasMd = t.any { it in markdownChars }
+            val streamKey = "${part.messageID}:${part.id}"
+            val streamed = streamingText[streamKey]
+            val t = remember(part.text, streamed) { (streamed ?: (part.text ?: "")).trimEnd() }
+            val codeBg = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.12f)
+            val linkColor = MaterialTheme.colorScheme.primary
+            val quoteColor = MaterialTheme.colorScheme.outline
+            val textColor = MaterialTheme.colorScheme.onSurfaceVariant
             Box(
                 Modifier
                     .widthIn(max = 360.dp)
@@ -925,16 +1448,12 @@ private fun PartContent(part: LegacyPart, streamingText: Map<String, String>, pr
                     .padding(12.dp),
             ) {
                 SelectionContainer {
-                    if (hasMd) {
-                        Markdown(rememberMarkdownState(t, retainState = true))
-                    } else {
-                        Text(t, style = MaterialTheme.typography.bodyMedium)
-                    }
+                    CommonMarkDocumentContent(t, codeBg, linkColor, quoteColor, textColor)
                 }
             }
         }
-        "reasoning" -> ReasoningPart(part, streamingText)
-        "tool" -> ToolPart(part, projectRoot)
+        "reasoning" -> ReasoningPart(part, streamingText, chatPainters)
+        "tool" -> ToolPart(part, projectRoot, chatPainters)
         "compaction" -> Box(
             Modifier.fillMaxWidth(),
             contentAlignment = Alignment.Center,
@@ -946,15 +1465,15 @@ private fun PartContent(part: LegacyPart, streamingText: Map<String, String>, pr
                 modifier = Modifier.padding(vertical = 4.dp),
             )
         }
-        "agent" -> AgentPart(part)
+        "agent" -> AgentPart(part, chatPainters)
     }
 }
 
-@Composable private fun AgentPart(part: LegacyPart) {
+@Composable private fun AgentPart(part: LegacyPart, chatPainters: ChatPainters) {
     val label = part.name?.let { "Launched $it" } ?: "Launched agent"
     val sub = part.description?.takeIf { it.isNotBlank() } ?: part.title?.takeIf { it.isNotBlank() }
     Row(Modifier.padding(vertical = 2.dp).clip(RoundedCornerShape(8.dp)).background(MaterialTheme.colorScheme.surfaceVariant).padding(10.dp), verticalAlignment = Alignment.CenterVertically) {
-        Image(painterResource(botIcon), null, Modifier.size(14.dp))
+        Image(chatPainters.bot, null, Modifier.size(14.dp))
         Spacer(Modifier.width(8.dp))
         Column {
             Text(label, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
@@ -967,18 +1486,25 @@ private fun PartContent(part: LegacyPart, streamingText: Map<String, String>, pr
 }
 
 @Composable
-private fun ToolPart(part: LegacyPart, projectRoot: String) {
-    val tc = when (part.state?.status) {
-        "pending" -> MaterialTheme.colorScheme.outline
-        "running" -> MaterialTheme.colorScheme.tertiary
-        "completed" -> MaterialTheme.colorScheme.primary
-        "error" -> MaterialTheme.colorScheme.error
-        else -> MaterialTheme.colorScheme.outline
+private fun ToolPart(part: LegacyPart, projectRoot: String, chatPainters: ChatPainters) {
+    val outlineColor = MaterialTheme.colorScheme.outline
+    val tertiaryColor = MaterialTheme.colorScheme.tertiary
+    val primaryColor = MaterialTheme.colorScheme.primary
+    val errorColor = MaterialTheme.colorScheme.error
+    val status = part.state?.status
+    val tc = remember(status, outlineColor, tertiaryColor, primaryColor, errorColor) {
+        when (status) {
+            "pending" -> outlineColor
+            "running" -> tertiaryColor
+            "completed" -> primaryColor
+            "error" -> errorColor
+            else -> outlineColor
+        }
     }
-    val label = remember(part) { toolLabel(part, projectRoot) }
-    val matchSuffix = remember(part) { matchCount(part) }
+    val label = remember(part.id) { toolLabel(part, projectRoot) }
+    val matchSuffix = remember(part.id) { matchCount(part) }
     if (part.tool == "task") {
-        val desc = remember(part) { taskDescription(part) }
+        val desc = remember(part.id) { taskDescription(part) }
         Row(
             Modifier
                 .padding(vertical = 2.dp)
@@ -987,7 +1513,7 @@ private fun ToolPart(part: LegacyPart, projectRoot: String) {
                 .padding(10.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
-            Image(painterResource(botIcon), null, Modifier.size(14.dp))
+            Image(chatPainters.bot, null, Modifier.size(14.dp))
             Spacer(Modifier.width(8.dp))
             Column(Modifier.weight(1f)) {
                 Text(
@@ -1018,7 +1544,7 @@ private fun ToolPart(part: LegacyPart, projectRoot: String) {
         ) {
             Column {
                 Row(verticalAlignment = Alignment.CenterVertically) {
-                    Image(painterResource(Res.drawable.terminal), null, Modifier.size(14.dp))
+                    Image(chatPainters.terminal, null, Modifier.size(14.dp))
                     Spacer(Modifier.width(6.dp))
                     Text(
                         label,
@@ -1050,14 +1576,14 @@ private fun ToolPart(part: LegacyPart, projectRoot: String) {
     } else {
         var expanded by remember { mutableStateOf(false) }
         val isExpandable = part.tool in setOf("websearch", "webfetch", "question", "invalid", "read", "write", "edit")
-        val isDirectory = remember(part) { isDirectoryRead(part) }
-        val icon = when {
-            part.tool == "invalid" -> circleXIcon
-            part.tool == "read" && isDirectory -> Res.drawable.folder
-            part.tool in listOf("glob", "grep") -> searchIcon
-            part.tool == "question" -> circleQuestionMarkIcon
-            part.tool in listOf("websearch", "webfetch") -> globeIcon
-            else -> Res.drawable.file
+        val isDirectory = remember(part.id) { isDirectoryRead(part) }
+        val iconPainter = when {
+            part.tool == "invalid" -> chatPainters.invalid
+            part.tool == "read" && isDirectory -> chatPainters.folder
+            part.tool in listOf("glob", "grep") -> chatPainters.search
+            part.tool == "question" -> chatPainters.question
+            part.tool in listOf("websearch", "webfetch") -> chatPainters.globe
+            else -> chatPainters.file
         }
         Column {
             Row(
@@ -1067,7 +1593,7 @@ private fun ToolPart(part: LegacyPart, projectRoot: String) {
                     .padding(vertical = 2.dp),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
-                Image(painterResource(icon), null, Modifier.size(14.dp))
+                Image(iconPainter, null, Modifier.size(14.dp))
                 Spacer(Modifier.width(4.dp))
                 Text(
                     label,
@@ -1116,8 +1642,12 @@ private fun ToolPart(part: LegacyPart, projectRoot: String) {
                             null -> null
                         }
                         if (inputObj != null) {
+                            val inputStr = remember(part.id) {
+                                val raw = try { prettyJson.encodeToString(JsonElement.serializer(), inputObj) } catch (_: Exception) { "" }
+                                if (raw.length > 3000) raw.take(3000) + "\n... (truncated)" else raw
+                            }
                             Text(
-                                prettyJson.encodeToString(JsonElement.serializer(), inputObj),
+                                inputStr,
                                 style = MaterialTheme.typography.bodySmall,
                                 fontFamily = FontFamily.Monospace,
                                 color = MaterialTheme.colorScheme.onSurfaceVariant,
@@ -1129,9 +1659,12 @@ private fun ToolPart(part: LegacyPart, projectRoot: String) {
                             else -> null
                         }
                         if (output != null) {
+                            val outputStr = remember(part.id) {
+                                if (output.length > 3000) output.take(3000) + "\n... (truncated)" else output
+                            }
                             Spacer(Modifier.height(4.dp))
                             Text(
-                                output,
+                                outputStr,
                                 style = MaterialTheme.typography.bodySmall,
                                 fontFamily = FontFamily.Monospace,
                                 color = MaterialTheme.colorScheme.onSurfaceVariant,
@@ -1181,7 +1714,12 @@ private fun toolLabel(part: LegacyPart, projectRoot: String): String {
     return when(part.tool) {
         "read","write","edit" -> obj["filePath"]?.toString()?.removeSurrounding("\"")?.let { relativePath(it, projectRoot) }?.ifEmpty{null} ?: (part.tool ?: "tool")
         "glob","grep" -> obj["pattern"]?.toString()?.removeSurrounding("\"").let{ if(it!=null&&it.length>40) it.take(40)+"..." else it} ?: (part.tool ?: "tool")
-        "bash" -> obj["command"]?.toString()?.removeSurrounding("\"").let{ if(it!=null) "$$it" else null} ?: "bash"
+        "bash" -> {
+            val raw = obj["command"]?.jsonPrimitive?.contentOrNull ?: obj["command"]?.toString()?.removeSurrounding("\"")
+            val firstLine = raw?.lines()?.firstOrNull { it.isNotBlank() }?.trim() ?: ""
+            val singleLine = if (firstLine.length > 50) firstLine.take(50) + "..." else firstLine
+            if (singleLine.isNotBlank()) "$ $singleLine" else "bash"
+        }
         "task" -> {
             val subType = obj["subagent_type"]?.toString()?.removeSurrounding("\"") ?: ""
             if (subType.isNotBlank()) "Launched $subType agent" else "Launched agent"
