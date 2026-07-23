@@ -287,8 +287,13 @@ private fun buildSubtitle(session: SessionInfo): String? {
     val parts = mutableListOf<String>()
     val relative = relativeTime(session.time.updated)
     if (relative != null) parts.add(relative)
-    val totalTokens = (session.tokens?.input ?: 0) + (session.tokens?.output ?: 0)
+    val totalTokens = (session.tokens?.input ?: 0) + (session.tokens?.output ?: 0) + (session.tokens?.reasoning ?: 0) + (session.tokens?.cache?.read ?: 0) + (session.tokens?.cache?.write ?: 0)
     if (totalTokens > 0) parts.add(formatTokens(totalTokens))
+    if (session.cost != null && session.cost > 0) {
+        val dollars = session.cost.toLong()
+        val cents = ((session.cost - dollars) * 100).toLong()
+        parts.add("$${dollars}.${cents.toString().padStart(2, '0')}")
+    }
     if (parts.isEmpty()) {
         val dir = session.location.directory.trimEnd('/').split('/')
         if (dir.isNotEmpty()) parts.add(dir.takeLast(2).joinToString("/"))

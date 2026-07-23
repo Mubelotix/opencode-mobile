@@ -24,12 +24,21 @@ data class SessionInfo(
     val location: SessionLocation,
     val parentID: String? = null,
     val tokens: SessionTokens? = null,
+    val cost: Double? = null,
 )
 
 @Serializable
 data class SessionTokens(
     val input: Long = 0,
     val output: Long = 0,
+    val reasoning: Long = 0,
+    val cache: SessionTokenCache = SessionTokenCache(),
+)
+
+@Serializable
+data class SessionTokenCache(
+    val read: Long = 0,
+    val write: Long = 0,
 )
 
 @Serializable

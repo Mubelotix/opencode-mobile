@@ -55,6 +55,7 @@ import page.dera.opencode.api.LegacyWithParts
 import page.dera.opencode.api.OpencodeApi
 import page.dera.opencode.api.PermissionRequest
 import page.dera.opencode.api.PermissionToolRef
+import page.dera.opencode.api.SessionTokens
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.contentOrNull
 import kotlinx.serialization.json.jsonArray
@@ -80,6 +81,9 @@ fun SessionDetailScreen(api: OpencodeApi, sessionId: String, sessionTitle: Strin
     var isSending by remember { mutableStateOf(false) }
     var isRunning by remember { mutableStateOf(false) }
     var errorText by remember { mutableStateOf<String?>(null) }
+    var sessionTokens by remember { mutableStateOf<SessionTokens?>(null) }
+    var sessionCost by remember { mutableStateOf<Double?>(null) }
+    var currentTitle by remember { mutableStateOf(sessionTitle) }
     val streamingText = remember { mutableStateMapOf<String, String>() }
     var streamVersion by remember { mutableStateOf(0) }
     val permissionRequests = remember { mutableStateListOf<PermissionRequest>() }
@@ -128,6 +132,14 @@ fun SessionDetailScreen(api: OpencodeApi, sessionId: String, sessionTitle: Strin
                             fresh.forEach { f -> if (messages.none { m -> m.info.id == f.info.id }) messages.add(f) }
                         }
                     }
+                    "session.updated" -> {
+                        val infoJson = props["info"]?.jsonObject ?: return@collect
+                        currentTitle = infoJson["title"]?.jsonPrimitive?.contentOrNull ?: currentTitle
+                        try {
+                            sessionTokens = kotlinx.serialization.json.Json { ignoreUnknownKeys = true; coerceInputValues = true }.decodeFromJsonElement(SessionTokens.serializer(), infoJson["tokens"] ?: return@collect)
+                        } catch (_: Exception) {}
+                        sessionCost = infoJson["cost"]?.jsonPrimitive?.contentOrNull?.toDoubleOrNull()
+                    }
                     "permission.asked" -> {
                         println("OC_DBG: permission.asked props=$props")
                         val id = props["id"]?.jsonPrimitive?.content ?: return@collect
@@ -169,7 +181,23 @@ fun SessionDetailScreen(api: OpencodeApi, sessionId: String, sessionTitle: Strin
     }
 
     Scaffold(
-        topBar = { TopAppBar(title = { Text(sessionTitle.ifEmpty { "Session" }, style = MaterialTheme.typography.titleMedium, maxLines = 1) }, navigationIcon = { IconButton(onClick = onBack) { Text("<", style = MaterialTheme.typography.titleMedium) } }) },
+        topBar = {
+            TopAppBar(
+                title = {
+                    Column {
+                        Text(currentTitle.ifEmpty { "Session" }, style = MaterialTheme.typography.titleMedium, maxLines = 1)
+                        val subtitles = mutableListOf<String>()
+                        val totalTokens = (sessionTokens?.input ?: 0) + (sessionTokens?.output ?: 0) + (sessionTokens?.reasoning ?: 0) + (sessionTokens?.cache?.read ?: 0) + (sessionTokens?.cache?.write ?: 0)
+                        if (totalTokens > 0) subtitles.add(formatTokenCount(totalTokens))
+                        sessionCost?.let { subtitles.add(formatCost(it)) }
+                        if (subtitles.isNotEmpty()) {
+                            Text(subtitles.joinToString("  ·  "), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 1)
+                        }
+                    }
+                },
+                navigationIcon = { IconButton(onClick = onBack) { Text("<", style = MaterialTheme.typography.titleMedium) } }
+            )
+        },
         bottomBar = {
             Row(Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 8.dp), verticalAlignment = Alignment.Bottom) {
                 val doSend = {
@@ -322,4 +350,18 @@ private fun toolLabel(part: LegacyPart): String {
         "bash" -> obj["command"]?.toString()?.removeSurrounding("\"").let{ if(it!=null) "$$it" else null} ?: "bash"
         else -> part.tool ?: "tool"
     }
+}
+
+private fun formatTokenCount(count: Long): String {
+    return when {
+        count >= 1_000_000 -> "${count / 1_000_000}.${(count % 1_000_000) / 100_000}M tokens"
+        count >= 1_000 -> "${count / 1_000}.${(count % 1_000) / 100}k tokens"
+        else -> "$count tokens"
+    }
+}
+
+private fun formatCost(cost: Double): String {
+    val dollars = cost.toLong()
+    val cents = ((cost - dollars) * 100).toLong()
+    return "$$dollars.${cents.toString().padStart(2, '0')}"
 }
