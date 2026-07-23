@@ -28,6 +28,7 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Checkbox
@@ -668,12 +669,14 @@ private fun MessageCard(msg: LegacyWithParts, streamingText: Map<String, String>
                     .background(MaterialTheme.colorScheme.primaryContainer)
                     .padding(12.dp),
             ) {
-                Text(
-                    parts.filter { it.type == "text" }.joinToString("\n") { it.text ?: "" }
-                        .ifEmpty { "Sent a message" },
-                    style = MaterialTheme.typography.bodyMedium,
-                    color = MaterialTheme.colorScheme.onPrimaryContainer,
-                )
+                SelectionContainer {
+                    Text(
+                        parts.filter { it.type == "text" }.joinToString("\n") { it.text ?: "" }
+                            .ifEmpty { "Sent a message" },
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.onPrimaryContainer,
+                    )
+                }
             }
         }
         "assistant" -> AssistantCard(msg.info, parts, streamingText, streamVersion, projectRoot)
@@ -752,7 +755,9 @@ private fun PartContent(part: LegacyPart, streamingText: Map<String, String>, st
                     .background(MaterialTheme.colorScheme.surfaceVariant)
                     .padding(12.dp),
             ) {
-                Markdown(md)
+                SelectionContainer {
+                    Markdown(md)
+                }
             }
         }
         "reasoning" -> ReasoningPart(part, streamingText, streamVersion)
