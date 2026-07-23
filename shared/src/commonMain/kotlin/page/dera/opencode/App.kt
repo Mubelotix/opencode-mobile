@@ -20,6 +20,9 @@ import androidx.compose.material3.ModalDrawerSheet
 import androidx.compose.material3.ModalNavigationDrawer
 import androidx.compose.material3.NavigationDrawerItem
 import androidx.compose.material3.NavigationDrawerItemDefaults
+import androidx.compose.material3.Scaffold
+import androidx.compose.material3.SnackbarHost
+import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.rememberDrawerState
@@ -90,6 +93,7 @@ fun App() {
     val activeTab = tabs.find { it.id == activeTabId }
     val drawerState = rememberDrawerState(DrawerValue.Closed)
     val scope = rememberCoroutineScope()
+    val snackbarHostState = remember { SnackbarHostState() }
 
     fun openProject(api: OpencodeApi, directory: String, name: String, currentTabId: String?) {
         val targetTab = currentTabId?.let { tabs.find { t -> t.id == it } }
@@ -185,26 +189,34 @@ fun App() {
                 }
             },
         ) {
-            if (activeTab != null) {
-                TabContent(
-                    tab = activeTab,
-                    settings = settings,
-                    onUpdateTab = { updated -> tabs = tabs.map { if (it.id == updated.id) updated else it } },
-                    onCloseTab = {
-                        tabs = tabs.filter { t -> t.id != activeTab.id }
-                        activeTabId = tabs.firstOrNull()?.id
-                    },
-                    onOpenDrawer = { scope.launch { drawerState.open() } },
-                    onOpenProject = { a, dir, name -> openProject(a, dir, name, activeTab.id) },
-                )
-            } else {
-                LandingContent(
-                    screen = landingScreen,
-                    settings = settings,
-                    onNavigate = { landingScreen = it },
-                    onOpenDrawer = { scope.launch { drawerState.open() } },
-                    onOpenProject = { a, dir, name -> openProject(a, dir, name, null) },
-                )
+            Scaffold(
+                snackbarHost = { SnackbarHost(snackbarHostState) },
+            ) {
+                if (activeTab != null) {
+                    TabContent(
+                        tab = activeTab,
+                        allTabs = tabs,
+                        snackbarHostState = snackbarHostState,
+                        settings = settings,
+                        onUpdateTab = { updated -> tabs = tabs.map { if (it.id == updated.id) updated else it } },
+                        onCloseTab = {
+                            tabs = tabs.filter { t -> t.id != activeTab.id }
+                            activeTabId = tabs.firstOrNull()?.id
+                        },
+                        onCloseTabById = { id -> tabs = tabs.filter { t -> t.id != id } },
+                        onOpenDrawer = { scope.launch { drawerState.open() } },
+                        onOpenProject = { a, dir, name -> openProject(a, dir, name, activeTab.id) },
+                        onSwitchTab = { activeTabId = it },
+                    )
+                } else {
+                    LandingContent(
+                        screen = landingScreen,
+                        settings = settings,
+                        onNavigate = { landingScreen = it },
+                        onOpenDrawer = { scope.launch { drawerState.open() } },
+                        onOpenProject = { a, dir, name -> openProject(a, dir, name, null) },
+                    )
+                }
             }
         }
     }
@@ -271,11 +283,15 @@ private fun LandingContent(
 @Composable
 private fun TabContent(
     tab: Tab,
+    allTabs: List<Tab>,
+    snackbarHostState: SnackbarHostState,
     settings: AppSettings,
     onUpdateTab: (Tab) -> Unit,
     onCloseTab: () -> Unit,
+    onCloseTabById: (String) -> Unit,
     onOpenDrawer: () -> Unit,
     onOpenProject: (OpencodeApi, String, String) -> Unit,
+    onSwitchTab: (String) -> Unit,
 ) {
     when (val ts = tab.screen) {
         is TabScreen.ProjectSelection -> {
@@ -303,6 +319,7 @@ private fun TabContent(
         }
         is TabScreen.ProjectDetail -> {
             BackHandler { onUpdateTab(tab.copy(screen = TabScreen.ProjectSelection(ts.api))) }
+            val scope = rememberCoroutineScope()
             ProjectScreen(
                 api = ts.api,
                 directory = ts.directory,
@@ -310,7 +327,17 @@ private fun TabContent(
                 settings = settings,
                 onBack = { onUpdateTab(tab.copy(screen = TabScreen.ProjectSelection(ts.api))) },
                 onSessionClick = { session ->
-                    onUpdateTab(tab.copy(screen = TabScreen.SessionDetail(ts.api, ts.directory, ts.name, session)))
+                    val duplicateTab = allTabs.find { t ->
+                        t.id != tab.id && (t.screen as? TabScreen.SessionDetail)?.session?.id == session.id
+                    }
+                    if (duplicateTab != null) {
+                        val currentTabId = tab.id
+                        onSwitchTab(duplicateTab.id)
+                        onCloseTabById(currentTabId)
+                        scope.launch { snackbarHostState.showSnackbar("Session is already open") }
+                    } else {
+                        onUpdateTab(tab.copy(screen = TabScreen.SessionDetail(ts.api, ts.directory, ts.name, session)))
+                    }
                 },
                 onMenuClick = onOpenDrawer,
             )
