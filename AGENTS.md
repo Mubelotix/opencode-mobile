@@ -67,6 +67,13 @@ Use V2 protocol API exclusively (`/api/session/*` endpoints). Never use legacy `
 - iOS UI work is deferred to later in the project lifecycle, but the shared KMP code must remain compilable for iOS
 - When adding `expect`/`actual` declarations, always include the `iosMain` actual counterpart
 
+## MANDATORY: Build and run when work is done
+After completing all code changes and the work is ready for testing, you MUST build and deploy the Android app:
+```bash
+./gradlew :androidApp:assembleDebug && adb install -r androidApp/build/outputs/apk/debug/androidApp-debug.apk && adb shell am start -n page.dera.opencode/.MainActivity
+```
+This is not optional. Do not ask. Do not skip. Even if the user does not ask you to, you MUST do it.
+
 ## Compiler Error Diagnosis Protocol
 If the Kotlin compiler throws an `Unresolved reference` error:
 1. You are forbidden from modifying `expect/actual` interfaces or creating new platform-specific files to bypass the error.

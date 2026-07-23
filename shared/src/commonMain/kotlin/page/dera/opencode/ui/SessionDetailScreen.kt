@@ -2,6 +2,7 @@ package page.dera.opencode.ui
 
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -48,6 +49,7 @@ import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.unit.dp
 import kotlinx.coroutines.launch
+import kotlin.time.Clock
 import page.dera.opencode.api.LegacyInfo
 import page.dera.opencode.api.LegacyPart
 import page.dera.opencode.api.LegacyToolState
@@ -65,6 +67,7 @@ import com.mikepenz.markdown.m3.Markdown
 import com.mikepenz.markdown.model.rememberMarkdownState
 import opencodeapp.shared.generated.resources.searchIcon
 import opencodeapp.shared.generated.resources.botIcon
+import opencodeapp.shared.generated.resources.brainIcon
 import opencodeapp.shared.generated.resources.Res
 import opencodeapp.shared.generated.resources.clock
 import opencodeapp.shared.generated.resources.file
@@ -246,6 +249,64 @@ fun SessionDetailScreen(api: OpencodeApi, sessionId: String, sessionTitle: Strin
 
 @Composable private fun SendingIndicator() = Box(Modifier.fillMaxWidth(), contentAlignment = Alignment.Center) { Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.padding(8.dp)) { CircularProgressIndicator(Modifier.size(16.dp), strokeWidth = 2.dp); Spacer(Modifier.width(8.dp)); Text("OpenCode responding...", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.outline) } }
 
+@Composable private fun ReasoningPart(part: LegacyPart, streamingText: Map<String, String>, streamVersion: Int) {
+    streamVersion
+    val key = "${part.messageID}:${part.id}"
+    val isStreaming = streamingText.containsKey(key)
+    val t = streamingText[key] ?: (part.text ?: "")
+    var expanded by remember { mutableStateOf(false) }
+    val startTimes = remember { mutableStateMapOf<String, Long>() }
+    val finalDurations = remember { mutableStateMapOf<String, String>() }
+    if (isStreaming && !startTimes.containsKey(key)) {
+        startTimes[key] = Clock.System.now().toEpochMilliseconds()
+        finalDurations.remove(key)
+    }
+    val startTime = startTimes[key]
+    if (!isStreaming && startTime != null && !finalDurations.containsKey(key)) {
+        val totalMs = Clock.System.now().toEpochMilliseconds() - startTime
+        finalDurations[key] = if (totalMs < 1000) "Thought in ${totalMs}ms"
+        else "Thought in ${thinkingDurationSeconds(totalMs)}"
+    }
+    val headerText = if (isStreaming) {
+        val elapsed = startTime?.let { Clock.System.now().toEpochMilliseconds() - it } ?: 0
+        if (elapsed < 1000) "${elapsed}ms" else thinkingDurationText(elapsed)
+    } else finalDurations[key] ?: "Thought"
+    val modifier = if (expanded) Modifier.fillMaxWidth().padding(vertical = 2.dp).clip(RoundedCornerShape(8.dp))
+        .background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = .5f))
+        .clickable { expanded = !expanded }.padding(8.dp)
+    else Modifier.fillMaxWidth().padding(vertical = 2.dp)
+        .clickable { expanded = !expanded }.padding(horizontal = 8.dp, vertical = 4.dp)
+    Box(modifier) {
+        Column {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Image(painterResource(brainIcon), null, Modifier.size(14.dp))
+                Spacer(Modifier.width(6.dp))
+                Text(headerText, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.tertiary)
+            }
+            if (expanded) {
+                Spacer(Modifier.height(4.dp))
+                Text(t, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            }
+        }
+    }
+}
+
+private fun thinkingDurationText(ms: Long): String {
+    val tenths = (ms / 100).toInt()
+    val whole = tenths / 10
+    val frac = tenths % 10
+    return if (whole < 10) "Thinking for $whole.${frac}s"
+           else "Thinking for ${whole}s"
+}
+
+private fun thinkingDurationSeconds(ms: Long): String {
+    val tenths = (ms / 100).toInt()
+    val whole = tenths / 10
+    val frac = tenths % 10
+    return if (whole < 10) "$whole.$frac s"
+           else "${whole}s"
+}
+
 @Composable private fun PermissionPrompt(req: PermissionRequest, api: OpencodeApi, sessionId: String, directory: String) {
     val scope = rememberCoroutineScope()
     var replying by remember { mutableStateOf(false) }
@@ -310,22 +371,24 @@ fun SessionDetailScreen(api: OpencodeApi, sessionId: String, sessionTitle: Strin
     val parts = msg.parts.filter { it.type !in listOf("step-start","step-finish","snapshot","patch") }
     when (msg.info.role) {
         "user" -> Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) { Column(Modifier.widthIn(max = 320.dp).clip(RoundedCornerShape(16.dp, 4.dp, 16.dp, 16.dp)).background(MaterialTheme.colorScheme.primaryContainer).padding(12.dp)) { Text(parts.filter { it.type=="text" }.joinToString("\n"){it.text ?: ""}.ifEmpty{"Sent a message"}, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onPrimaryContainer) } }
-        "assistant" -> AssistantCard(msg.info, parts, streamingText)
+        "assistant" -> AssistantCard(msg.info, parts, streamingText, streamVersion)
         else -> Box(Modifier.fillMaxWidth(), contentAlignment = Alignment.Center) { Column(horizontalAlignment = Alignment.CenterHorizontally, modifier = Modifier.padding(vertical = 4.dp)) { Text("System message", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.outline); parts.filter { it.type == "text" && !it.text.isNullOrBlank() }.forEach { part -> Text(part.text!!, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.outline, modifier = Modifier.padding(top = 2.dp)) } } }
     }
 }
 
-@Composable private fun AssistantCard(info: LegacyInfo, parts: List<LegacyPart>, streamingText: Map<String, String>) {
+@Composable private fun AssistantCard(info: LegacyInfo, parts: List<LegacyPart>, streamingText: Map<String, String>, streamVersion: Int) {
+    streamVersion
     Column(Modifier.fillMaxWidth().padding(start = 8.dp)) {
         if (info.error != null) Box(Modifier.fillMaxWidth().clip(RoundedCornerShape(12.dp)).background(MaterialTheme.colorScheme.errorContainer).padding(14.dp)) { Row(verticalAlignment = Alignment.Top) { Image(painterResource(Res.drawable.triangle_alert), null, Modifier.size(22.dp)); Spacer(Modifier.width(10.dp)); Column { Text("Error", style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.onErrorContainer); Spacer(Modifier.height(4.dp)); Text(info.error!!.name, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onErrorContainer) } } }
-        parts.forEach { PartContent(it, streamingText) }
+        parts.forEach { PartContent(it, streamingText, streamVersion) }
     }
 }
 
-@Composable private fun PartContent(part: LegacyPart, streamingText: Map<String, String>) {
+@Composable private fun PartContent(part: LegacyPart, streamingText: Map<String, String>, streamVersion: Int) {
+    streamVersion
     when (part.type) {
         "text" -> { val t = (streamingText["${part.messageID}:${part.id}"] ?: (part.text ?: "")).trimEnd(); val md = rememberMarkdownState(t, retainState = true); Box(Modifier.widthIn(max=360.dp).clip(RoundedCornerShape(4.dp,16.dp,16.dp,16.dp)).background(MaterialTheme.colorScheme.surfaceVariant).padding(12.dp)) { Markdown(md) } }
-        "reasoning" -> { val t = streamingText["${part.messageID}:${part.id}"] ?: (part.text ?: ""); Box(Modifier.fillMaxWidth().padding(vertical=2.dp).clip(RoundedCornerShape(8.dp)).background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha=.5f)).padding(8.dp)) { Column { Text("Thinking", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.tertiary); Spacer(Modifier.height(4.dp)); Text(t, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant) } } }
+        "reasoning" -> ReasoningPart(part, streamingText, streamVersion)
         "tool" -> ToolPart(part)
         "compaction" -> Box(Modifier.fillMaxWidth(), contentAlignment = Alignment.Center) { Text("Context compacted", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.outline, modifier = Modifier.padding(vertical=4.dp)) }
           "agent" -> AgentPart(part)
