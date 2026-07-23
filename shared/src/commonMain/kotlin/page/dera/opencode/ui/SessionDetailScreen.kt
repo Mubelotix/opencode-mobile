@@ -85,6 +85,7 @@ import com.mikepenz.markdown.m3.Markdown
 import com.mikepenz.markdown.model.rememberMarkdownState
 import opencodeapp.shared.generated.resources.globeIcon
 import opencodeapp.shared.generated.resources.searchIcon
+import opencodeapp.shared.generated.resources.sendIcon
 import opencodeapp.shared.generated.resources.botIcon
 import opencodeapp.shared.generated.resources.brainIcon
 import opencodeapp.shared.generated.resources.circleQuestionMarkIcon
@@ -349,8 +350,16 @@ fun SessionDetailScreen(api: OpencodeApi, sessionId: String, sessionTitle: Strin
                     keyboardOptions = KeyboardOptions(imeAction = ImeAction.Send),
                     keyboardActions = KeyboardActions(onSend = { doSend() }), enabled = !isSending
                 )
-                Spacer(Modifier.width(8.dp))
-                Button(onClick = { doSend() }, enabled = inputText.isNotBlank() && !isSending, modifier = Modifier.height(56.dp)) { Text(if (isSending) "..." else "Send") }
+                Spacer(Modifier.width(2.dp))
+                Icon(
+                    painter = painterResource(sendIcon),
+                    contentDescription = "Send",
+                    tint = if (inputText.isNotBlank() && !isSending) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface.copy(alpha = 0.38f),
+                    modifier = Modifier
+                        .size(48.dp)
+                        .padding(12.dp)
+                        .clickable(enabled = inputText.isNotBlank() && !isSending) { doSend() }
+                )
             }
         }
     }

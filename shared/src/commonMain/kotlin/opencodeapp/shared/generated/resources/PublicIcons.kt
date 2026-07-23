@@ -10,3 +10,4 @@ val globeIcon: DrawableResource get() = Res.drawable.globe
 val circleXIcon: DrawableResource get() = Res.drawable.circle_x
 val checkIcon: DrawableResource get() = Res.drawable.check
 val infinityIcon: DrawableResource get() = Res.drawable.infinity
+val sendIcon: DrawableResource get() = Res.drawable.send
