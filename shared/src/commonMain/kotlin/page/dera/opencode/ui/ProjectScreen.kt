@@ -20,6 +20,7 @@ import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Scaffold
@@ -40,17 +41,18 @@ import androidx.compose.ui.unit.dp
 import kotlin.time.Clock
 
 import kotlinx.coroutines.launch
-import page.dera.opencode.api.OpencodeApi
-import page.dera.opencode.api.SessionInfo
-import page.dera.opencode.settings.AppSettings
 import opencodeapp.shared.generated.resources.Res
 import opencodeapp.shared.generated.resources.star
 import opencodeapp.shared.generated.resources.star_filled
+import opencodeapp.shared.generated.resources.menuIcon
 import org.jetbrains.compose.resources.painterResource
+import page.dera.opencode.api.OpencodeApi
+import page.dera.opencode.api.SessionInfo
+import page.dera.opencode.settings.AppSettings
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun ProjectScreen(api: OpencodeApi, directory: String, name: String, settings: AppSettings, onBack: () -> Unit, onSessionClick: (SessionInfo) -> Unit) {
+fun ProjectScreen(api: OpencodeApi, directory: String, name: String, settings: AppSettings, onBack: () -> Unit, onSessionClick: (SessionInfo) -> Unit, onMenuClick: (() -> Unit)? = null) {
     var sessions by remember { mutableStateOf<List<SessionInfo>>(emptyList()) }
     var nextCursor by remember { mutableStateOf<String?>(null) }
     var hasMore by remember { mutableStateOf(false) }
@@ -81,6 +83,17 @@ fun ProjectScreen(api: OpencodeApi, directory: String, name: String, settings: A
         topBar = {
             TopAppBar(
                 title = { Text(name) },
+                navigationIcon = {
+                    if (onMenuClick != null) {
+                        IconButton(onClick = onMenuClick) {
+                            Image(
+                                painter = painterResource(menuIcon),
+                                contentDescription = "Tabs",
+                                modifier = Modifier.size(24.dp),
+                            )
+                        }
+                    }
+                },
                 actions = {
                     var starred by remember { mutableStateOf(settings.isPinned(directory)) }
                     Image(
@@ -273,12 +286,6 @@ private fun SessionCard(session: SessionInfo, onClick: () -> Unit) {
                     )
                 }
             }
-            Spacer(modifier = Modifier.width(8.dp))
-            Text(
-                text = ">",
-                style = MaterialTheme.typography.bodyLarge,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-            )
         }
     }
 }
@@ -330,7 +337,7 @@ private fun groupByWorkspace(sessions: List<SessionInfo>): LinkedHashMap<String,
     val grouped = LinkedHashMap<String, MutableList<SessionInfo>>()
     for (session in sessions) {
         val key = session.location.workspaceID?.removePrefix("wrk_")?.replaceFirstChar { it.uppercase() }
-            ?: "Default"
+            ?: "Default Workspace"
         grouped.getOrPut(key) { mutableListOf() }.add(session)
     }
     return grouped.mapValues { it.value.toList() } as LinkedHashMap<String, List<SessionInfo>>

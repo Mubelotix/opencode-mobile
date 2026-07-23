@@ -98,11 +98,12 @@ import opencodeapp.shared.generated.resources.file
 import opencodeapp.shared.generated.resources.folder
 import opencodeapp.shared.generated.resources.terminal
 import opencodeapp.shared.generated.resources.triangle_alert
+import opencodeapp.shared.generated.resources.menuIcon
 import org.jetbrains.compose.resources.painterResource
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun SessionDetailScreen(api: OpencodeApi, sessionId: String, sessionTitle: String, directory: String, projectRoot: String, onBack: () -> Unit) {
+fun SessionDetailScreen(api: OpencodeApi, sessionId: String, sessionTitle: String, directory: String, projectRoot: String, onBack: () -> Unit, onMenuClick: (() -> Unit)? = null) {
     val messages = remember { mutableStateListOf<LegacyWithParts>() }
     val listState = rememberLazyListState()
     var inputText by remember { mutableStateOf("") }
@@ -287,7 +288,17 @@ fun SessionDetailScreen(api: OpencodeApi, sessionId: String, sessionTitle: Strin
                         }
                     }
                 },
-                navigationIcon = { IconButton(onClick = onBack) { Text("<", style = MaterialTheme.typography.titleMedium) } }
+                navigationIcon = {
+                    if (onMenuClick != null) {
+                        IconButton(onClick = onMenuClick) {
+                            Image(
+                                painter = painterResource(menuIcon),
+                                contentDescription = "Tabs",
+                                modifier = Modifier.size(20.dp),
+                            )
+                        }
+                    }
+                }
             )
         },
         bottomBar = {},

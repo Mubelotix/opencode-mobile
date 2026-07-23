@@ -17,6 +17,7 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Scaffold
@@ -33,6 +34,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import opencodeapp.shared.generated.resources.Res
 import opencodeapp.shared.generated.resources.star
+import opencodeapp.shared.generated.resources.menuIcon
 import org.jetbrains.compose.resources.painterResource
 import page.dera.opencode.settings.AppSettings
 
@@ -42,10 +44,24 @@ fun StarredScreen(
     settings: AppSettings,
     onBrowseFiles: () -> Unit,
     onOpenFolder: (path: String) -> Unit,
+    onMenuClick: (() -> Unit)? = null,
 ) {
     Scaffold(
         topBar = {
-            TopAppBar(title = { Text("Opencode") })
+            TopAppBar(
+                title = { Text("Opencode") },
+                navigationIcon = {
+                    if (onMenuClick != null) {
+                        IconButton(onClick = onMenuClick) {
+                            Image(
+                                painter = painterResource(menuIcon),
+                                contentDescription = "Tabs",
+                                modifier = Modifier.size(24.dp),
+                            )
+                        }
+                    }
+                },
+            )
         },
     ) { padding ->
         val starred = settings.pinnedFolders
@@ -74,7 +90,7 @@ fun StarredScreen(
             ) {
                 item(key = "starred_header") {
                     Text(
-                        text = "Starred",
+                        text = "Starred Projects",
                         style = MaterialTheme.typography.titleSmall,
                         color = MaterialTheme.colorScheme.primary,
                         modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 10.dp),

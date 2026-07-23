@@ -11,3 +11,5 @@ val circleXIcon: DrawableResource get() = Res.drawable.circle_x
 val checkIcon: DrawableResource get() = Res.drawable.check
 val infinityIcon: DrawableResource get() = Res.drawable.infinity
 val sendIcon: DrawableResource get() = Res.drawable.send
+val menuIcon: DrawableResource get() = Res.drawable.menu
+val xIcon: DrawableResource get() = Res.drawable.x
