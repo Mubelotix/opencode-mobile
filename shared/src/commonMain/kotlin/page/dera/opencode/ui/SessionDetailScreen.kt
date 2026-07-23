@@ -65,6 +65,7 @@ import page.dera.opencode.api.QuestionRequest
 import page.dera.opencode.api.QuestionToolRef
 import page.dera.opencode.api.SessionTokens
 import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.contentOrNull
 import kotlinx.serialization.json.jsonArray
@@ -72,6 +73,7 @@ import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
 import com.mikepenz.markdown.m3.Markdown
 import com.mikepenz.markdown.model.rememberMarkdownState
+import opencodeapp.shared.generated.resources.globeIcon
 import opencodeapp.shared.generated.resources.searchIcon
 import opencodeapp.shared.generated.resources.botIcon
 import opencodeapp.shared.generated.resources.brainIcon
@@ -819,37 +821,88 @@ private fun ToolPart(part: LegacyPart) {
             }
         }
     } else {
+        var expanded by remember { mutableStateOf(false) }
+        val isExpandable = part.tool in setOf("websearch", "webfetch")
         val icon = when (part.tool) {
             "glob", "grep" -> searchIcon
             "question" -> circleQuestionMarkIcon
+            "websearch", "webfetch" -> globeIcon
             else -> Res.drawable.file
         }
-        Row(
-            Modifier.padding(vertical = 2.dp),
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            Image(painterResource(icon), null, Modifier.size(14.dp))
-            Spacer(Modifier.width(4.dp))
-            Text(
-                label,
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                maxLines = 1,
-            )
-            if (matchSuffix != null) {
+        Column {
+            Row(
+                Modifier
+                    .then(if (isExpandable) Modifier.clickable { expanded = !expanded } else Modifier)
+                    .padding(vertical = 2.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Image(painterResource(icon), null, Modifier.size(14.dp))
+                Spacer(Modifier.width(4.dp))
                 Text(
-                    " $matchSuffix",
+                    label,
                     style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.outline,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
                     maxLines = 1,
                 )
+                if (matchSuffix != null) {
+                    Text(
+                        " $matchSuffix",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.outline,
+                        maxLines = 1,
+                    )
+                }
+                Spacer(Modifier.weight(1f))
+                Text(
+                    part.state?.status ?: "",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = tc.copy(alpha = .7f),
+                )
             }
-            Spacer(Modifier.weight(1f))
-            Text(
-                part.state?.status ?: "",
-                style = MaterialTheme.typography.labelSmall,
-                color = tc.copy(alpha = .7f),
-            )
+            if (expanded && isExpandable) {
+                Box(
+                    Modifier
+                        .fillMaxWidth()
+                        .padding(top = 2.dp, bottom = 4.dp)
+                        .clickable { expanded = false }
+                        .clip(RoundedCornerShape(8.dp))
+                        .background(MaterialTheme.colorScheme.surfaceVariant)
+                        .padding(8.dp),
+                ) {
+                    Column {
+                        val inputObj = when (val s = part.state) {
+                            is LegacyToolState.Pending -> s.input
+                            is LegacyToolState.Running -> s.input
+                            is LegacyToolState.Completed -> s.input
+                            is LegacyToolState.Error -> s.input
+                            null -> null
+                        }
+                        if (inputObj != null) {
+                            val pretty = Json { prettyPrint = true }
+                            Text(
+                                pretty.encodeToString(JsonElement.serializer(), inputObj),
+                                style = MaterialTheme.typography.bodySmall,
+                                fontFamily = FontFamily.Monospace,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            )
+                        }
+                        val output = when (val s = part.state) {
+                            is LegacyToolState.Completed -> s.output.takeIf { it.isNotBlank() }
+                            is LegacyToolState.Error -> s.error.takeIf { it.isNotBlank() }
+                            else -> null
+                        }
+                        if (output != null) {
+                            Spacer(Modifier.height(4.dp))
+                            Text(
+                                output,
+                                style = MaterialTheme.typography.bodySmall,
+                                fontFamily = FontFamily.Monospace,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            )
+                        }
+                    }
+                }
+            }
         }
     }
 }
@@ -888,6 +941,15 @@ private fun toolLabel(part: LegacyPart): String {
                 ?: first?.get("header")?.toString()?.removeSurrounding("\"")
                 ?: "Asking question"
         }
+        "websearch" -> obj["query"]?.toString()?.removeSurrounding("\"").let {
+            if (it != null && it.length > 40) it.take(40) + "..." else it
+        } ?: "websearch"
+        "webfetch" -> obj["url"]?.toString()?.removeSurrounding("\"").let {
+            val host = it?.let { url ->
+                Regex("://([^/]+)").find(url)?.groupValues?.get(1)
+            } ?: it
+            if (host != null && host.length > 40) host.take(40) + "..." else host
+        } ?: "webfetch"
         else -> part.tool ?: "tool"
     }
 }
