@@ -64,6 +64,7 @@ import kotlinx.serialization.json.jsonPrimitive
 import com.mikepenz.markdown.m3.Markdown
 import com.mikepenz.markdown.model.rememberMarkdownState
 import opencodeapp.shared.generated.resources.searchIcon
+import opencodeapp.shared.generated.resources.botIcon
 import opencodeapp.shared.generated.resources.Res
 import opencodeapp.shared.generated.resources.clock
 import opencodeapp.shared.generated.resources.file
@@ -327,7 +328,23 @@ fun SessionDetailScreen(api: OpencodeApi, sessionId: String, sessionTitle: Strin
         "reasoning" -> { val t = streamingText["${part.messageID}:${part.id}"] ?: (part.text ?: ""); Box(Modifier.fillMaxWidth().padding(vertical=2.dp).clip(RoundedCornerShape(8.dp)).background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha=.5f)).padding(8.dp)) { Column { Text("Thinking", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.tertiary); Spacer(Modifier.height(4.dp)); Text(t, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant) } } }
         "tool" -> ToolPart(part)
         "compaction" -> Box(Modifier.fillMaxWidth(), contentAlignment = Alignment.Center) { Text("Context compacted", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.outline, modifier = Modifier.padding(vertical=4.dp)) }
-         "agent" -> Box(Modifier.fillMaxWidth(), contentAlignment = Alignment.Center) { Text("Agent: ${part.name ?: ""}", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.outline, modifier = Modifier.padding(vertical=4.dp)) }
+          "agent" -> AgentPart(part)
+    }
+}
+
+@Composable private fun AgentPart(part: LegacyPart) {
+    val label = part.name?.let { "Launched $it" } ?: "Launched agent"
+    val sub = part.description?.takeIf { it.isNotBlank() } ?: part.title?.takeIf { it.isNotBlank() }
+    Row(Modifier.padding(vertical = 2.dp).clip(RoundedCornerShape(8.dp)).background(MaterialTheme.colorScheme.surfaceVariant).padding(10.dp), verticalAlignment = Alignment.CenterVertically) {
+        Image(painterResource(botIcon), null, Modifier.size(14.dp))
+        Spacer(Modifier.width(8.dp))
+        Column {
+            Text(label, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            if (sub != null) {
+                Spacer(Modifier.height(2.dp))
+                Text(sub, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.outline, maxLines = 2)
+            }
+        }
     }
 }
 
@@ -335,7 +352,21 @@ fun SessionDetailScreen(api: OpencodeApi, sessionId: String, sessionTitle: Strin
     val tc = when(part.state?.status) { "pending"->MaterialTheme.colorScheme.outline; "running"->MaterialTheme.colorScheme.tertiary; "completed"->MaterialTheme.colorScheme.primary; "error"->MaterialTheme.colorScheme.error; else->MaterialTheme.colorScheme.outline }
     val label = toolLabel(part)
     val matchSuffix = matchCount(part)
-    if (part.tool == "bash") Box(Modifier.fillMaxWidth().padding(vertical=2.dp).clip(RoundedCornerShape(8.dp)).background(Color(0xFF1E1E2E)).padding(10.dp)) {
+    if (part.tool == "task") {
+        val desc = taskDescription(part)
+        Row(Modifier.padding(vertical = 2.dp).clip(RoundedCornerShape(8.dp)).background(MaterialTheme.colorScheme.surfaceVariant).padding(10.dp), verticalAlignment = Alignment.CenterVertically) {
+            Image(painterResource(botIcon), null, Modifier.size(14.dp))
+            Spacer(Modifier.width(8.dp))
+            Column(Modifier.weight(1f)) {
+                Text(label, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                if (desc != null) {
+                    Spacer(Modifier.height(2.dp))
+                    Text(desc, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.outline, maxLines = 2)
+                }
+            }
+            Box(Modifier.size(6.dp).clip(CircleShape).background(tc))
+        }
+    } else if (part.tool == "bash") Box(Modifier.fillMaxWidth().padding(vertical=2.dp).clip(RoundedCornerShape(8.dp)).background(Color(0xFF1E1E2E)).padding(10.dp)) {
         Column { Row(verticalAlignment = Alignment.CenterVertically) { Image(painterResource(Res.drawable.terminal), null, Modifier.size(14.dp)); Spacer(Modifier.width(6.dp)); Text(label, style = MaterialTheme.typography.bodySmall, fontFamily = FontFamily.Monospace, color = Color(0xFFCDD6F4), maxLines=1); Spacer(Modifier.weight(1f)); Box(Modifier.size(6.dp).clip(CircleShape).background(tc)) }
             if (part.state is LegacyToolState.Running) { Spacer(Modifier.height(4.dp)); Row(verticalAlignment = Alignment.CenterVertically) { CircularProgressIndicator(Modifier.size(12.dp), strokeWidth=1.5.dp); Spacer(Modifier.width(8.dp)); Text("Running...", style = MaterialTheme.typography.bodySmall, color = Color(0xFFA6ADC8)) } } }
     } else {
@@ -361,8 +392,18 @@ private fun toolLabel(part: LegacyPart): String {
         "read","write","edit" -> obj["filePath"]?.toString()?.removeSurrounding("\"")?.substringAfterLast('/')?.ifEmpty{null} ?: (part.tool ?: "tool")
         "glob","grep" -> obj["pattern"]?.toString()?.removeSurrounding("\"").let{ if(it!=null&&it.length>40) it.take(40)+"..." else it} ?: (part.tool ?: "tool")
         "bash" -> obj["command"]?.toString()?.removeSurrounding("\"").let{ if(it!=null) "$$it" else null} ?: "bash"
+        "task" -> {
+            val subType = obj["subagent_type"]?.toString()?.removeSurrounding("\"") ?: ""
+            if (subType.isNotBlank()) "Launched $subType agent" else "Launched agent"
+        }
         else -> part.tool ?: "tool"
     }
+}
+
+private fun taskDescription(part: LegacyPart): String? {
+    val input = when(val s=part.state) { is LegacyToolState.Pending->s.input; is LegacyToolState.Running->s.input; is LegacyToolState.Completed->s.input; is LegacyToolState.Error->s.input; null->null }
+    val obj = input as? JsonObject ?: return null
+    return obj["description"]?.toString()?.removeSurrounding("\"")?.takeIf { it.isNotBlank() }
 }
 
 private fun formatTokenCount(count: Long): String {
