@@ -2,8 +2,10 @@ package page.dera.opencode
 
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
@@ -35,6 +37,7 @@ import io.ktor.client.HttpClient
 import io.ktor.client.plugins.HttpTimeout
 import kotlinx.coroutines.launch
 import opencodeapp.shared.generated.resources.menuIcon
+import opencodeapp.shared.generated.resources.settingsIcon
 import opencodeapp.shared.generated.resources.xIcon
 import org.jetbrains.compose.resources.painterResource
 import page.dera.opencode.api.OpencodeApi
@@ -45,6 +48,7 @@ import page.dera.opencode.ui.ProjectScreen
 import page.dera.opencode.ui.SessionDetailScreen
 import page.dera.opencode.ui.StarredScreen
 import page.dera.opencode.ui.WelcomeScreen
+import page.dera.opencode.ui.SettingsScreen
 import page.dera.opencode.ui.BackHandler
 
 private sealed class Screen {
@@ -52,6 +56,7 @@ private sealed class Screen {
     data class Starred(val api: OpencodeApi) : Screen()
     data class Explorer(val api: OpencodeApi) : Screen()
     data class Welcome(val api: OpencodeApi) : Screen()
+    data class Settings(val api: OpencodeApi) : Screen()
 }
 
 @Composable
@@ -83,7 +88,6 @@ fun App() {
     }
 
     val activeTab = tabs.find { it.id == activeTabId }
-    val hasTabs = tabs.isNotEmpty()
     val drawerState = rememberDrawerState(DrawerValue.Closed)
     val scope = rememberCoroutineScope()
 
@@ -101,63 +105,82 @@ fun App() {
     MaterialTheme {
         ModalNavigationDrawer(
             drawerState = drawerState,
-            gesturesEnabled = hasTabs,
             drawerContent = {
                 ModalDrawerSheet {
-                    Spacer(Modifier.height(12.dp))
-                    Text(
-                        "Sessions",
-                        style = MaterialTheme.typography.titleMedium,
-                        modifier = Modifier.padding(horizontal = 28.dp, vertical = 8.dp),
-                    )
-                    if (tabs.isEmpty()) {
+                    Column(Modifier.fillMaxHeight()) {
+                        Spacer(Modifier.height(12.dp))
                         Text(
-                            "No open tabs",
-                            style = MaterialTheme.typography.bodyMedium,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                            modifier = Modifier.padding(horizontal = 28.dp, vertical = 16.dp),
+                            "Sessions",
+                            style = MaterialTheme.typography.titleMedium,
+                            modifier = Modifier.padding(horizontal = 28.dp, vertical = 8.dp),
                         )
-                    }
-                    LazyColumn {
-                        items(tabs, key = { it.id }) { tab ->
-                            val isActive = tab.id == activeTabId
-                            NavigationDrawerItem(
-                                label = {
-                                    Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-                                        Text(tab.title(), modifier = Modifier.weight(1f))
-                                        IconButton(onClick = {
-                                            tabs = tabs.filter { t -> t.id != tab.id }
-                                            if (activeTabId == tab.id) {
-                                                activeTabId = tabs.firstOrNull()?.id
-                                            }
-                                        }) {
-                                            Image(
-                                                painter = painterResource(xIcon),
-                                                contentDescription = "Close tab",
-                                                modifier = Modifier.size(18.dp),
-                                            )
-                                        }
-                                    }
-                                },
-                                selected = isActive,
-                                onClick = {
-                                    activeTabId = tab.id
-                                    scope.launch { drawerState.close() }
-                                },
-                                modifier = Modifier.padding(NavigationDrawerItemDefaults.ItemPadding),
+                        if (tabs.isEmpty()) {
+                            Text(
+                                "No open tabs",
+                                style = MaterialTheme.typography.bodyMedium,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                modifier = Modifier.padding(horizontal = 28.dp, vertical = 16.dp),
                             )
                         }
-                    }
-                    Spacer(Modifier.height(8.dp))
-                    TextButton(
-                        onClick = {
-                            activeTabId = null
-                            landingScreen = Screen.Starred(api)
-                            scope.launch { drawerState.close() }
-                        },
-                        modifier = Modifier.padding(horizontal = 20.dp),
-                    ) {
-                        Text("+ Open Session")
+                        LazyColumn {
+                            items(tabs, key = { it.id }) { tab ->
+                                val isActive = tab.id == activeTabId
+                                NavigationDrawerItem(
+                                    label = {
+                                        Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                                            Text(tab.title(), modifier = Modifier.weight(1f))
+                                            IconButton(onClick = {
+                                                tabs = tabs.filter { t -> t.id != tab.id }
+                                                if (activeTabId == tab.id) {
+                                                    activeTabId = tabs.firstOrNull()?.id
+                                                }
+                                            }) {
+                                                Image(
+                                                    painter = painterResource(xIcon),
+                                                    contentDescription = "Close tab",
+                                                    modifier = Modifier.size(18.dp),
+                                                )
+                                            }
+                                        }
+                                    },
+                                    selected = isActive,
+                                    onClick = {
+                                        activeTabId = tab.id
+                                        scope.launch { drawerState.close() }
+                                    },
+                                    modifier = Modifier.padding(NavigationDrawerItemDefaults.ItemPadding),
+                                )
+                            }
+                        }
+                        Spacer(Modifier.height(8.dp))
+                        TextButton(
+                            onClick = {
+                                activeTabId = null
+                                landingScreen = Screen.Starred(api)
+                                scope.launch { drawerState.close() }
+                            },
+                            modifier = Modifier.padding(horizontal = 20.dp),
+                        ) {
+                            Text("+ Open Session")
+                        }
+                        Spacer(Modifier.weight(1f))
+                        NavigationDrawerItem(
+                            label = { Text("Settings") },
+                            selected = false,
+                            onClick = {
+                                activeTabId = null
+                                landingScreen = Screen.Settings(api)
+                                scope.launch { drawerState.close() }
+                            },
+                            icon = {
+                                Image(
+                                    painter = painterResource(settingsIcon),
+                                    contentDescription = "Settings",
+                                    modifier = Modifier.size(24.dp),
+                                )
+                            },
+                            modifier = Modifier.padding(NavigationDrawerItemDefaults.ItemPadding),
+                        )
                     }
                 }
             },
@@ -178,7 +201,6 @@ fun App() {
                 LandingContent(
                     screen = landingScreen,
                     settings = settings,
-                    hasTabs = hasTabs,
                     onNavigate = { landingScreen = it },
                     onOpenDrawer = { scope.launch { drawerState.open() } },
                     onOpenProject = { a, dir, name -> openProject(a, dir, name, null) },
@@ -192,7 +214,6 @@ fun App() {
 private fun LandingContent(
     screen: Screen,
     settings: AppSettings,
-    hasTabs: Boolean,
     onNavigate: (Screen) -> Unit,
     onOpenDrawer: () -> Unit,
     onOpenProject: (OpencodeApi, String, String) -> Unit,
@@ -219,7 +240,7 @@ private fun LandingContent(
                     val name = path.trimEnd('/').split('/').last().ifEmpty { path }
                     onOpenProject(screen.api, path, name)
                 },
-                onMenuClick = if (hasTabs) onOpenDrawer else null,
+                onMenuClick = onOpenDrawer,
             )
         }
         is Screen.Explorer -> {
@@ -231,7 +252,17 @@ private fun LandingContent(
                     val name = directory.trimEnd('/').split('/').last().ifEmpty { directory }
                     onOpenProject(screen.api, directory, name)
                 },
-                onMenuClick = if (hasTabs) onOpenDrawer else null,
+                onMenuClick = onOpenDrawer,
+            )
+        }
+        is Screen.Settings -> {
+            SettingsScreen(
+                settings = settings,
+                onDisconnect = {
+                    settings.clear()
+                    onNavigate(Screen.Welcome(screen.api))
+                },
+                onBack = { onNavigate(Screen.Starred(screen.api)) },
             )
         }
     }

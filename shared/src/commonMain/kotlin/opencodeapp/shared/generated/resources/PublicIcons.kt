@@ -13,3 +13,4 @@ val infinityIcon: DrawableResource get() = Res.drawable.infinity
 val sendIcon: DrawableResource get() = Res.drawable.send
 val menuIcon: DrawableResource get() = Res.drawable.menu
 val xIcon: DrawableResource get() = Res.drawable.x
+val settingsIcon: DrawableResource get() = Res.drawable.settings

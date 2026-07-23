@@ -49,13 +49,13 @@ fun StarredScreen(
     Scaffold(
         topBar = {
             TopAppBar(
-                title = { Text("Opencode") },
+                title = { Text("Projects") },
                 navigationIcon = {
                     if (onMenuClick != null) {
                         IconButton(onClick = onMenuClick) {
                             Image(
                                 painter = painterResource(menuIcon),
-                                contentDescription = "Tabs",
+                                contentDescription = "Open menu",
                                 modifier = Modifier.size(24.dp),
                             )
                         }
@@ -90,7 +90,7 @@ fun StarredScreen(
             ) {
                 item(key = "starred_header") {
                     Text(
-                        text = "Starred Projects",
+                        text = "Starred",
                         style = MaterialTheme.typography.titleSmall,
                         color = MaterialTheme.colorScheme.primary,
                         modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 10.dp),
