@@ -3,6 +3,7 @@ package page.dera.opencode.ui
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -34,6 +35,7 @@ import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.RadioButton
+import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
@@ -459,17 +461,20 @@ private fun thinkingDurationSeconds(ms: Long): String {
                 }, enabled = !replying) {
                     Text("Approve once")
                 }
-                Button(onClick = {
+                OutlinedButton(onClick = {
                     replying = true
                     scope.launch {
                         println("OC_DBG: permission reject ${req.id}")
                         api.replyPermission(sessionId, req.id, "reject", directory)
                         replying = false
                     }
-                }, enabled = !replying, colors = ButtonDefaults.buttonColors(
-                    containerColor = MaterialTheme.colorScheme.errorContainer,
-                    contentColor = MaterialTheme.colorScheme.onErrorContainer
-                )) {
+                }, enabled = !replying,
+                    colors = ButtonDefaults.outlinedButtonColors(
+                        containerColor = MaterialTheme.colorScheme.errorContainer,
+                        contentColor = MaterialTheme.colorScheme.error
+                    ),
+                    border = BorderStroke(1.dp, MaterialTheme.colorScheme.error)
+                ) {
                     Text("Deny")
                 }
             }
@@ -607,17 +612,20 @@ private fun QuestionPrompt(req: QuestionRequest, api: OpencodeApi, sessionId: St
                 }, enabled = !replying) {
                     Text("Submit")
                 }
-                Button(onClick = {
+                OutlinedButton(onClick = {
                     replying = true
                     scope.launch {
                         val r = api.rejectQuestion(sessionId, req.id, directory)
                         println("OC_DBG: question dismiss result=$r")
                         replying = false
                     }
-                }, enabled = !replying, colors = ButtonDefaults.buttonColors(
-                    containerColor = MaterialTheme.colorScheme.errorContainer,
-                    contentColor = MaterialTheme.colorScheme.onErrorContainer
-                )) {
+                }, enabled = !replying,
+                    colors = ButtonDefaults.outlinedButtonColors(
+                        containerColor = MaterialTheme.colorScheme.errorContainer,
+                        contentColor = MaterialTheme.colorScheme.error
+                    ),
+                    border = BorderStroke(1.dp, MaterialTheme.colorScheme.error)
+                ) {
                     Text("Dismiss")
                 }
             }
