@@ -659,7 +659,7 @@ private fun MessageCard(msg: LegacyWithParts, streamingText: Map<String, String>
     val parts = msg.parts.filter { it.type !in listOf("step-start", "step-finish", "snapshot", "patch") }
     when (msg.info.role) {
         "user" -> Row(
-            Modifier.fillMaxWidth().padding(vertical = 2.dp),
+            Modifier.fillMaxWidth().padding(top = 8.dp, bottom = 2.dp),
             horizontalArrangement = Arrangement.End,
         ) {
             Column(
