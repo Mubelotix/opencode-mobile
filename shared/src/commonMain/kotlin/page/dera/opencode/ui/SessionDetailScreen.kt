@@ -762,15 +762,17 @@ private fun SendingIndicator() {
         val elapsed = startTime?.let { Clock.System.now().toEpochMilliseconds() - it } ?: 0
         if (elapsed < 1000) "Thinking for ${elapsed}ms" else "Thinking for ${thinkingDurationText(elapsed)}s"
     } else finalDurations[key] ?: "Thought"
-    Row(Modifier.fillMaxWidth().padding(vertical = 2.dp).clickable { expanded = !expanded }, verticalAlignment = Alignment.CenterVertically) {
-        Image(painters.brain, null, Modifier.size(14.dp))
-        Spacer(Modifier.width(4.dp))
-        Text(headerText, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-    }
-    if (expanded && t.isNotBlank()) {
-        Box(Modifier.fillMaxWidth().padding(vertical = 2.dp).clip(RoundedCornerShape(8.dp))
-            .background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = .5f)).padding(8.dp)) {
-            Text(truncateForDisplay(t), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+    Column {
+        Row(Modifier.fillMaxWidth().padding(vertical = 2.dp).clickable { expanded = !expanded }, verticalAlignment = Alignment.CenterVertically) {
+            Image(painters.brain, null, Modifier.size(14.dp))
+            Spacer(Modifier.width(4.dp))
+            Text(headerText, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        }
+        if (expanded && t.isNotBlank()) {
+            Box(Modifier.fillMaxWidth().padding(vertical = 2.dp).clip(RoundedCornerShape(8.dp))
+                .background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = .5f)).padding(8.dp)) {
+                Text(truncateForDisplay(t), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            }
         }
     }
 }
