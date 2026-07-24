@@ -232,6 +232,7 @@ private data class ChatPainters(
     val invalid: Painter,
     val brain: Painter,
     val alert: Painter,
+    val listChecks: Painter,
 )
 
 // Newest row first, because the list uses reverseLayout.
@@ -333,6 +334,7 @@ fun SessionDetailScreen(api: OpencodeApi, sessionId: String, sessionTitle: Strin
         invalid = painterResource(circleXIcon),
         brain = painterResource(brainIcon),
         alert = painterResource(Res.drawable.triangle_alert),
+        listChecks = painterResource(listChecksIcon),
     )
 
     // reverseLayout keeps the viewport pinned to the bottom while the newest row
@@ -1249,13 +1251,14 @@ private fun ToolPart(row: AssistantPartRow, painters: ChatPainters) {
         }
     } else {
         var expanded by remember { mutableStateOf(false) }
-        val isExpandable = part.tool in setOf("websearch", "webfetch", "question", "invalid", "read", "write", "edit")
+        val isExpandable = part.tool in setOf("websearch", "webfetch", "question", "invalid", "read", "write", "edit", "todowrite")
         val icon = when {
             part.tool == "invalid" -> painters.invalid
             part.tool == "read" && row.isDirectory -> painters.folder
             part.tool in listOf("glob", "grep") -> painters.search
             part.tool == "question" -> painters.question
             part.tool in listOf("websearch", "webfetch") -> painters.globe
+            part.tool == "todowrite" -> painters.listChecks
             else -> painters.file
         }
         Column {
@@ -1409,6 +1412,11 @@ private fun toolLabel(part: LegacyPart, projectRoot: String): String {
             } ?: it
             if (host != null && host.length > 40) host.take(40) + "..." else host
         } ?: "webfetch"
+        "todowrite" -> {
+            val todos = obj["todos"]?.jsonArray
+            val count = todos?.size ?: 0
+            "Planned $count todo item${if (count != 1) "s" else ""}"
+        }
         "invalid" -> {
             val error = obj["error"]?.toString()?.removeSurrounding("\"") ?: ""
             error.ifBlank { "Invalid tool call" }
