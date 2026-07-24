@@ -2,7 +2,6 @@ package page.dera.opencode.ui
 
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.clickable
-import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -39,8 +38,6 @@ import androidx.compose.ui.unit.dp
 import opencodeapp.shared.generated.resources.Res
 import opencodeapp.shared.generated.resources.folder
 import opencodeapp.shared.generated.resources.file
-import opencodeapp.shared.generated.resources.star
-import opencodeapp.shared.generated.resources.star_filled
 import opencodeapp.shared.generated.resources.menuIcon
 import org.jetbrains.compose.resources.painterResource
 import page.dera.opencode.api.FsEntry
@@ -62,7 +59,6 @@ fun FileExplorerScreen(
     var isLoading by remember { mutableStateOf(false) }
     var pathInput by remember { mutableStateOf(currentPath) }
     var showPathInput by remember { mutableStateOf(false) }
-    var pinnedFolders by remember { mutableStateOf(settings.pinnedFolders) }
     val pathStack = remember { mutableListOf(initialDirectory) }
     var stackPos by remember { mutableStateOf(0) }
 
@@ -213,20 +209,6 @@ fun FileExplorerScreen(
                                             maxLines = 1,
                                             overflow = TextOverflow.Ellipsis,
                                         )
-                                    }
-                                    if (entry.isDirectory) {
-                                        val filled = pinnedFolders.contains(fullPath)
-                                        Image(
-                                            painter = painterResource(if (filled) Res.drawable.star_filled else Res.drawable.star),
-                                            contentDescription = if (filled) "Unstar" else "Star",
-                                            modifier = Modifier.size(36.dp).clickable(
-                                                indication = null,
-                                                interactionSource = remember { MutableInteractionSource() },
-                                            ) {
-                                                settings.togglePinnedFolder(fullPath)
-                                                pinnedFolders = settings.pinnedFolders
-                                            }.padding(8.dp),
-                                            )
                                     }
                                 }
                             }
