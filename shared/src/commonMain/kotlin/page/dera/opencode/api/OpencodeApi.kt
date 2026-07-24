@@ -146,6 +146,28 @@ class OpencodeApi(
         } catch (e: Exception) { Result.failure(e) }
     }
 
+    suspend fun getSessionsStatus(directory: String): Result<Map<String, SessionStatusInfo>> {
+        return try {
+            val b = client.get("$serverUrl/api/session/status") {
+                authHeader()?.let { (k, v) -> header(k, v) }
+                url.parameters.append("directory", directory)
+            }.bodyAsText()
+            val map = json.decodeFromString<Map<String, SessionStatusInfo>>(b)
+            Result.success(map)
+        } catch (e: Exception) { Result.failure(e) }
+    }
+
+    suspend fun getSessionTodo(sessionId: String, directory: String): Result<List<TodoInfo>> {
+        return try {
+            val b = client.get("$serverUrl/api/session/$sessionId/todo") {
+                authHeader()?.let { (k, v) -> header(k, v) }
+                url.parameters.append("directory", directory)
+            }.bodyAsText()
+            val list = json.decodeFromString<List<TodoInfo>>(b)
+            Result.success(list)
+        } catch (e: Exception) { Result.failure(e) }
+    }
+
     fun streamGlobalEvents(directory: String): Flow<GlobalEvent> = flow {
         while (true) {
             println("OC_DBG: SSE connecting for dir=$directory")

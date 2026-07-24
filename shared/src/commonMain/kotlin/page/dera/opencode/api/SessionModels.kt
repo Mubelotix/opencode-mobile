@@ -23,6 +23,8 @@ data class SessionInfo(
     val time: SessionTime,
     val location: SessionLocation,
     val parentID: String? = null,
+    val agent: String? = null,
+    val slug: String? = null,
     val tokens: SessionTokens? = null,
     val cost: Double? = null,
 )
@@ -45,6 +47,8 @@ data class SessionTokenCache(
 data class SessionTime(
     val created: Long,
     val updated: Long,
+    val compacting: Long? = null,
+    val archived: Long? = null,
 )
 
 @Serializable
@@ -142,4 +146,30 @@ data class PromptFileResponse(
 data class PromptAgentResponse(
     val name: String,
     val source: FileAttachmentSource? = null,
+)
+
+@Serializable
+data class SessionStatusInfo(
+    val type: String,
+    val attempt: Long? = null,
+    val message: String? = null,
+    val next: Long? = null,
+    val action: SessionRetryAction? = null,
+)
+
+@Serializable
+data class SessionRetryAction(
+    val reason: String,
+    val provider: String,
+    val title: String,
+    val message: String,
+    val label: String,
+    val link: String? = null,
+)
+
+@Serializable
+data class TodoInfo(
+    val content: String,
+    val status: String,
+    val priority: String,
 )

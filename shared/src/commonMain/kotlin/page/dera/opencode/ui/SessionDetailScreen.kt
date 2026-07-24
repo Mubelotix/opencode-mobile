@@ -4,6 +4,7 @@ import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.BorderStroke
+import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.PaddingValues
@@ -75,6 +76,7 @@ import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.text.TextStyle
+import androidx.compose.ui.text.style.TextDecoration
 import androidx.compose.ui.unit.dp
 import kotlin.time.Clock
 import kotlinx.coroutines.Job
@@ -92,6 +94,7 @@ import page.dera.opencode.api.QuestionOption
 import page.dera.opencode.api.QuestionRequest
 import page.dera.opencode.api.QuestionToolRef
 import page.dera.opencode.api.SessionTokens
+import page.dera.opencode.api.TodoInfo
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.JsonObject
@@ -297,6 +300,7 @@ fun SessionDetailScreen(api: OpencodeApi, sessionId: String, sessionTitle: Strin
     val permissionRequests = remember { mutableStateListOf<PermissionRequest>() }
     val questionRequests = remember { mutableStateListOf<QuestionRequest>() }
     var selectedTab by remember { mutableStateOf(0) }
+    var todos by remember { mutableStateOf<List<TodoInfo>>(emptyList()) }
     val scope = rememberCoroutineScope()
 
     LaunchedEffect(sessionId) {
@@ -310,6 +314,10 @@ fun SessionDetailScreen(api: OpencodeApi, sessionId: String, sessionTitle: Strin
             }
         }.onFailure { errorText = it.message }
         isLoading = false
+    }
+
+    LaunchedEffect(sessionId, directory) {
+        api.getSessionTodo(sessionId, directory).onSuccess { todos = it }
     }
 
     val rows by remember { derivedStateOf { buildRows(messages, isSending || isRunning, projectRoot) } }
@@ -478,6 +486,10 @@ fun SessionDetailScreen(api: OpencodeApi, sessionId: String, sessionTitle: Strin
                             val rid = props["requestID"]?.jsonPrimitive?.content ?: return@collect
                             println("OC_DBG: question.rejected requestID=$rid")
                             questionRequests.removeAll { it.id == rid }
+                        }
+                        "todo.updated" -> {
+                            val td = props["todos"]?.jsonArray ?: return@collect
+                            todos = td.mapNotNull { try { Json { ignoreUnknownKeys = true; coerceInputValues = true }.decodeFromJsonElement(TodoInfo.serializer(), it) } catch (_: Exception) { null } }
                         }
                         "session.diff" -> {
                             val diff = props["diff"]?.jsonArray
@@ -703,12 +715,13 @@ fun SessionDetailScreen(api: OpencodeApi, sessionId: String, sessionTitle: Strin
                     )
                 }
             }
-            if (selectedTab != 0) {
+            if (selectedTab == 2) {
+                TodoContent(todos)
+            } else if (selectedTab != 0) {
                 Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
                     Text(
                     when (selectedTab) {
                         1 -> "Git Diff"
-                        2 -> "Todo"
                         3 -> "Terminal"
                         4 -> "Info"
                         5 -> "Browser"
@@ -1428,4 +1441,86 @@ private fun formatCost(cost: Double): String {
     val dollars = cost.toLong()
     val cents = ((cost - dollars) * 100).toLong()
     return "$$dollars.${cents.toString().padStart(2, '0')}"
+}
+
+@Composable
+private fun TodoContent(todos: List<TodoInfo>) {
+    if (todos.isEmpty()) {
+        Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+            Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                Text(
+                    "No tasks",
+                    style = MaterialTheme.typography.bodyLarge,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+                Spacer(Modifier.height(4.dp))
+                Text(
+                    "Tasks appear when the AI creates a plan",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+        }
+        return
+    }
+    val statusOrder = mapOf("in_progress" to 0, "pending" to 1, "completed" to 2, "cancelled" to 3)
+    val sorted = todos.sortedWith(compareBy { statusOrder[it.status] ?: 99 })
+
+    LazyColumn(
+        modifier = Modifier.fillMaxSize().padding(horizontal = 16.dp),
+        contentPadding = PaddingValues(vertical = 12.dp),
+    ) {
+        items(sorted, key = { "${it.content}_${it.status}" }) { todo ->
+            TodoRow(todo)
+        }
+    }
+}
+
+@Composable
+private fun TodoRow(todo: TodoInfo) {
+    val isComplete = todo.status == "completed" || todo.status == "cancelled"
+    val textColor = if (isComplete) MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.5f)
+        else MaterialTheme.colorScheme.onSurface
+
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(vertical = 6.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Box(Modifier.size(22.dp), contentAlignment = Alignment.Center) {
+            when (todo.status) {
+                "completed" -> Text(
+                    "\u2713",
+                    style = MaterialTheme.typography.bodyLarge,
+                    color = Color(0xFF4CAF50),
+                )
+                "cancelled" -> Text(
+                    "\u2715",
+                    style = MaterialTheme.typography.bodyLarge,
+                    color = Color(0xFFEF4444),
+                )
+                "in_progress" -> CircularProgressIndicator(
+                    modifier = Modifier.size(22.dp),
+                    strokeWidth = 2.dp,
+                    color = MaterialTheme.colorScheme.primary,
+                )
+                else -> Box(
+                    Modifier
+                        .size(18.dp)
+                        .clip(RoundedCornerShape(2.dp))
+                        .border(2.dp, MaterialTheme.colorScheme.onSurfaceVariant, RoundedCornerShape(2.dp)),
+                )
+            }
+        }
+        Spacer(Modifier.width(12.dp))
+        Text(
+            todo.content,
+            style = MaterialTheme.typography.bodyLarge.copy(
+                textDecoration = if (isComplete) TextDecoration.LineThrough else TextDecoration.None,
+            ),
+            color = textColor,
+            modifier = Modifier.weight(1f),
+        )
+    }
 }
