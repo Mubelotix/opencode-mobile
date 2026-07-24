@@ -78,9 +78,11 @@ import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import page.dera.opencode.api.LegacyInfo
 import page.dera.opencode.api.LegacyPart
 import page.dera.opencode.api.LegacyToolState
@@ -102,30 +104,6 @@ import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
 import com.mikepenz.markdown.m3.Markdown
 import com.mikepenz.markdown.model.rememberMarkdownState
-import org.commonmark.parser.Parser
-import org.commonmark.node.BlockQuote
-import org.commonmark.node.BulletList
-import org.commonmark.node.Code
-import org.commonmark.node.Emphasis
-import org.commonmark.node.HardLineBreak
-import org.commonmark.node.Heading
-import org.commonmark.node.Link
-import org.commonmark.node.ListItem
-import org.commonmark.node.Node
-import org.commonmark.node.OrderedList
-import org.commonmark.node.Paragraph
-import org.commonmark.node.SoftLineBreak
-import org.commonmark.node.StrongEmphasis
-import org.commonmark.node.Text as CommonMarkText
-import org.commonmark.node.FencedCodeBlock
-import org.commonmark.node.IndentedCodeBlock
-import org.commonmark.node.ThematicBreak
-import org.commonmark.ext.gfm.tables.TablesExtension
-import org.commonmark.ext.gfm.tables.TableBlock
-import org.commonmark.ext.gfm.tables.TableHead
-import org.commonmark.ext.gfm.tables.TableBody
-import org.commonmark.ext.gfm.tables.TableRow
-import org.commonmark.ext.gfm.tables.TableCell
 import opencodeapp.shared.generated.resources.globeIcon
 import opencodeapp.shared.generated.resources.searchIcon
 import opencodeapp.shared.generated.resources.sendIcon
@@ -152,374 +130,158 @@ import org.jetbrains.compose.resources.painterResource
 private val prettyJson = Json { prettyPrint = true }
 private val urlHostRegex = Regex("://([^/]+)")
 
-private val commonmarkParser = Parser.builder()
-    .extensions(listOf(TablesExtension.create()))
-    .build()
+internal sealed class DocumentSegment {
+    data class TextSegment(val text: String) : DocumentSegment()
+}
 
-private fun parseCommonMarkToAnnotatedString(
-    markdown: String,
-    codeBg: Color,
-    linkColor: Color,
-    quoteColor: Color
+private val annotatedCache = mutableMapOf<String, AnnotatedString>()
+
+internal fun getOrParseMarkdownAnnotatedString(
+    text: String,
+    primaryColor: Color,
+    codeBgColor: Color
 ): AnnotatedString {
-    val document = commonmarkParser.parse(markdown)
-    return buildAnnotatedString {
-        renderCommonMarkNode(document, codeBg, linkColor, quoteColor, isInsideListItem = false)
-    }
-}
+    val key = "${text.hashCode()}_${primaryColor.hashCode()}"
+    val cached = annotatedCache[key]
+    if (cached != null) return cached
 
-private fun AnnotatedString.Builder.endsWithNewline(): Boolean {
-    val t = toAnnotatedString().text
-    return t.isEmpty() || t.endsWith('\n')
-}
+    val result = buildAnnotatedString {
+        val lines = text.lines()
+        var inCodeBlock = false
+        val codeBlockSb = StringBuilder()
 
-private fun AnnotatedString.Builder.endsWithDoubleNewline(): Boolean {
-    val t = toAnnotatedString().text
-    return t.endsWith("\n\n")
-}
+        for (lineIdx in lines.indices) {
+            val line = lines[lineIdx]
 
-private fun collectTextContent(node: Node, sb: StringBuilder) {
-    var child = node.firstChild
-    while (child != null) {
-        if (child is CommonMarkText) {
-            sb.append(child.literal)
-        } else if (child is Code) {
-            sb.append(child.literal)
-        } else {
-            collectTextContent(child, sb)
-        }
-        child = child.next
-    }
-}
-
-private fun AnnotatedString.Builder.renderCommonMarkNode(
-    node: Node,
-    codeBg: Color,
-    linkColor: Color,
-    quoteColor: Color,
-    isInsideListItem: Boolean = false
-) {
-    when (node) {
-        is Paragraph -> {
-            if (!isInsideListItem) {
-                if (length > 0 && !endsWithNewline()) append("\n")
-                renderChildren(node, codeBg, linkColor, quoteColor, isInsideListItem = false)
-                append("\n\n")
-            } else {
-                renderChildren(node, codeBg, linkColor, quoteColor, isInsideListItem = true)
-            }
-        }
-        is Heading -> {
-            if (length > 0) {
-                if (!endsWithNewline()) append("\n\n") else if (!endsWithDoubleNewline()) append("\n")
-            }
-            val start = length
-            renderChildren(node, codeBg, linkColor, quoteColor, isInsideListItem)
-            val fontSize = when (node.level) {
-                1 -> 20.sp
-                2 -> 18.sp
-                else -> 16.sp
-            }
-            addStyle(SpanStyle(fontWeight = FontWeight.Bold, fontSize = fontSize), start, length)
-            append("\n\n")
-        }
-        is CommonMarkText -> {
-            append(node.literal)
-        }
-        is StrongEmphasis -> {
-            val start = length
-            renderChildren(node, codeBg, linkColor, quoteColor, isInsideListItem)
-            addStyle(SpanStyle(fontWeight = FontWeight.Bold), start, length)
-        }
-        is Emphasis -> {
-            val start = length
-            renderChildren(node, codeBg, linkColor, quoteColor, isInsideListItem)
-            addStyle(SpanStyle(fontStyle = FontStyle.Italic), start, length)
-        }
-        is Code -> {
-            val start = length
-            append(node.literal)
-            addStyle(SpanStyle(fontFamily = FontFamily.Monospace, background = codeBg), start, length)
-        }
-        is Link -> {
-            val start = length
-            renderChildren(node, codeBg, linkColor, quoteColor, isInsideListItem)
-            addStyle(SpanStyle(color = linkColor, textDecoration = TextDecoration.Underline), start, length)
-        }
-        is BulletList -> {
-            if (length > 0 && !endsWithNewline()) append("\n")
-            var item = node.firstChild
-            while (item != null) {
-                if (item is ListItem) {
-                    if (length > 0 && !endsWithNewline()) append("\n")
-                    withStyle(SpanStyle(fontWeight = FontWeight.Bold, color = linkColor)) {
-                        append("• ")
-                    }
-                    renderChildren(item, codeBg, linkColor, quoteColor, isInsideListItem = true)
+            if (line.startsWith("```")) {
+                if (inCodeBlock) {
+                    val start = length
+                    append(codeBlockSb.toString().trimEnd())
+                    addStyle(
+                        SpanStyle(
+                            fontFamily = FontFamily.Monospace,
+                            background = codeBgColor,
+                            fontSize = 13.sp
+                        ),
+                        start,
+                        length
+                    )
+                    append("\n")
+                    codeBlockSb.clear()
+                    inCodeBlock = false
+                } else {
+                    inCodeBlock = true
                 }
-                item = item.next
+                continue
             }
-            append("\n\n")
-        }
-        is OrderedList -> {
-            if (length > 0 && !endsWithNewline()) append("\n")
-            var num = node.startNumber
-            var item = node.firstChild
-            while (item != null) {
-                if (item is ListItem) {
-                    if (length > 0 && !endsWithNewline()) append("\n")
-                    withStyle(SpanStyle(fontWeight = FontWeight.Bold, color = linkColor)) {
-                        append("$num. ")
-                    }
-                    num++
-                    renderChildren(item, codeBg, linkColor, quoteColor, isInsideListItem = true)
-                }
-                item = item.next
+
+            if (inCodeBlock) {
+                codeBlockSb.append(line).append("\n")
+                continue
             }
-            append("\n\n")
+
+            if (line.startsWith("# ")) {
+                val start = length
+                append(line.substring(2))
+                addStyle(SpanStyle(fontWeight = FontWeight.Bold, fontSize = 18.sp), start, length)
+                append("\n")
+                continue
+            } else if (line.startsWith("## ")) {
+                val start = length
+                append(line.substring(3))
+                addStyle(SpanStyle(fontWeight = FontWeight.Bold, fontSize = 16.sp), start, length)
+                append("\n")
+                continue
+            } else if (line.startsWith("### ")) {
+                val start = length
+                append(line.substring(4))
+                addStyle(SpanStyle(fontWeight = FontWeight.Bold, fontSize = 15.sp), start, length)
+                append("\n")
+                continue
+            }
+
+            parseInlineMarkdownToBuilder(line, primaryColor, codeBgColor)
+            if (lineIdx < lines.lastIndex) {
+                append("\n")
+            }
         }
-        is ListItem -> {
-            renderChildren(node, codeBg, linkColor, quoteColor, isInsideListItem = true)
-        }
-        is BlockQuote -> {
-            if (length > 0 && !endsWithNewline()) append("\n")
+
+        if (inCodeBlock && codeBlockSb.isNotEmpty()) {
             val start = length
-            renderChildren(node, codeBg, linkColor, quoteColor, isInsideListItem)
-            addStyle(SpanStyle(fontStyle = FontStyle.Italic, color = quoteColor), start, length)
-        }
-        is TableBlock -> {
-            // TableBlock is handled by MarkdownTableComposable
-        }
-        is SoftLineBreak -> {
-            append("\n")
-        }
-        is HardLineBreak -> {
-            append("\n")
-        }
-        is ThematicBreak -> {
-            if (length > 0 && !endsWithNewline()) append("\n")
-            append("───\n")
-        }
-        else -> {
-            renderChildren(node, codeBg, linkColor, quoteColor, isInsideListItem)
-        }
-    }
-}
-
-private fun AnnotatedString.Builder.renderChildren(
-    node: Node,
-    codeBg: Color,
-    linkColor: Color,
-    quoteColor: Color,
-    isInsideListItem: Boolean
-) {
-    var child = node.firstChild
-    while (child != null) {
-        val next = child.next
-        renderCommonMarkNode(child, codeBg, linkColor, quoteColor, isInsideListItem)
-        child = next
-    }
-}
-
-@Composable
-private fun MarkdownTableComposable(
-    tableBlock: TableBlock,
-    codeBg: Color,
-    linkColor: Color,
-    quoteColor: Color
-) {
-    val headerRows = remember(tableBlock) {
-        mutableListOf<List<Node>>().apply {
-            var curr = tableBlock.firstChild
-            while (curr != null) {
-                if (curr is TableHead) {
-                    var r = curr.firstChild
-                    while (r != null) {
-                        if (r is TableRow) {
-                            val cells = mutableListOf<Node>()
-                            var c = r.firstChild
-                            while (c != null) {
-                                if (c is TableCell) cells.add(c)
-                                c = c.next
-                            }
-                            add(cells)
-                        }
-                        r = r.next
-                    }
-                }
-                curr = curr.next
-            }
-        }
-    }
-    val bodyRows = remember(tableBlock) {
-        mutableListOf<List<Node>>().apply {
-            var curr = tableBlock.firstChild
-            while (curr != null) {
-                if (curr is TableBody) {
-                    var r = curr.firstChild
-                    while (r != null) {
-                        if (r is TableRow) {
-                            val cells = mutableListOf<Node>()
-                            var c = r.firstChild
-                            while (c != null) {
-                                if (c is TableCell) cells.add(c)
-                                c = c.next
-                            }
-                            add(cells)
-                        }
-                        r = r.next
-                    }
-                }
-                curr = curr.next
-            }
-        }
-    }
-
-    val numCols = remember(headerRows, bodyRows) {
-        (headerRows + bodyRows).maxOfOrNull { it.size } ?: 0
-    }
-
-    if (numCols == 0) return
-
-    val colWidthsDp = remember(headerRows, bodyRows, numCols) {
-        val allRows = headerRows + bodyRows
-        Array(numCols) { colIdx ->
-            val maxLen = allRows.maxOfOrNull { row ->
-                val cellNode = row.getOrNull(colIdx)
-                if (cellNode != null) {
-                    val sb = StringBuilder()
-                    collectTextContent(cellNode, sb)
-                    sb.length
-                } else 0
-            } ?: 0
-            (maxLen * 9f + 24f).coerceIn(100f, 260f).dp
-        }
-    }
-
-    val horizontalScrollState = rememberScrollState()
-
-    Box(
-        Modifier
-            .fillMaxWidth()
-            .padding(vertical = 6.dp)
-            .clip(RoundedCornerShape(8.dp))
-            .border(BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant), RoundedCornerShape(8.dp))
-            .background(MaterialTheme.colorScheme.surface)
-    ) {
-        Box(Modifier.horizontalScroll(horizontalScrollState)) {
-            Column {
-                headerRows.forEach { row ->
-                    Row(
-                        Modifier
-                            .background(MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.6f))
-                            .padding(vertical = 2.dp)
-                    ) {
-                        for (colIdx in 0 until numCols) {
-                            val cellNode = row.getOrNull(colIdx)
-                            val cellText = remember(cellNode) {
-                                if (cellNode != null) {
-                                    buildAnnotatedString {
-                                        renderCommonMarkNode(cellNode, codeBg, linkColor, quoteColor, true)
-                                    }
-                                } else AnnotatedString("")
-                            }
-                            Box(
-                                Modifier
-                                    .width(colWidthsDp[colIdx])
-                                    .padding(horizontal = 10.dp, vertical = 6.dp),
-                                contentAlignment = Alignment.CenterStart
-                            ) {
-                                Text(
-                                    cellText,
-                                    style = MaterialTheme.typography.bodySmall,
-                                    fontWeight = FontWeight.Bold,
-                                    color = MaterialTheme.colorScheme.onPrimaryContainer
-                                )
-                            }
-                        }
-                    }
-                }
-
-                bodyRows.forEachIndexed { rowIdx, row ->
-                    val bg = if (rowIdx % 2 == 0) MaterialTheme.colorScheme.surface else MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.35f)
-                    Row(
-                        Modifier
-                            .background(bg)
-                            .padding(vertical = 2.dp)
-                    ) {
-                        for (colIdx in 0 until numCols) {
-                            val cellNode = row.getOrNull(colIdx)
-                            val cellText = remember(cellNode) {
-                                if (cellNode != null) {
-                                    buildAnnotatedString {
-                                        renderCommonMarkNode(cellNode, codeBg, linkColor, quoteColor, true)
-                                    }
-                                } else AnnotatedString("")
-                            }
-                            Box(
-                                Modifier
-                                    .width(colWidthsDp[colIdx])
-                                    .padding(horizontal = 10.dp, vertical = 6.dp),
-                                contentAlignment = Alignment.CenterStart
-                            ) {
-                                Text(
-                                    cellText,
-                                    style = MaterialTheme.typography.bodySmall,
-                                    color = MaterialTheme.colorScheme.onSurface
-                                )
-                            }
-                        }
-                    }
-                }
-            }
-        }
-    }
-}
-
-@Composable
-private fun CodeBlockComposable(
-    code: String,
-    info: String?
-) {
-    val displayCode = remember(code) {
-        if (code.length > 3000) code.take(3000) + "\n... (truncated for preview)" else code
-    }
-    Box(
-        Modifier
-            .fillMaxWidth()
-            .padding(vertical = 4.dp)
-            .clip(RoundedCornerShape(8.dp))
-            .background(Color(0xFF1E1E2E))
-            .padding(10.dp)
-    ) {
-        Column {
-            if (!info.isNullOrBlank()) {
-                Text(
-                    info.trim(),
-                    style = MaterialTheme.typography.labelSmall,
-                    color = MaterialTheme.colorScheme.outline,
-                    modifier = Modifier.padding(bottom = 4.dp)
-                )
-            }
-            Text(
-                displayCode,
-                style = TextStyle(
+            append(codeBlockSb.toString().trimEnd())
+            addStyle(
+                SpanStyle(
                     fontFamily = FontFamily.Monospace,
-                    fontSize = 13.sp,
-                    color = Color(0xFFCDD6F4)
-                )
+                    background = codeBgColor,
+                    fontSize = 13.sp
+                ),
+                start,
+                length
             )
         }
     }
+
+    annotatedCache[key] = result
+    return result
 }
 
-private sealed class DocumentSegment {
-    data class TextSegment(val annotated: AnnotatedString) : DocumentSegment()
-    data class CodeSegment(val code: String, val info: String?) : DocumentSegment()
-    data class TableSegment(val block: TableBlock) : DocumentSegment()
-}
+private fun AnnotatedString.Builder.parseInlineMarkdownToBuilder(
+    line: String,
+    primaryColor: Color,
+    codeBgColor: Color
+) {
+    var i = 0
+    val len = line.length
+    while (i < len) {
+        if (line[i] == '`') {
+            val end = line.indexOf('`', i + 1)
+            if (end != -1) {
+                val start = length
+                append(line.substring(i + 1, end))
+                addStyle(
+                    SpanStyle(fontFamily = FontFamily.Monospace, background = codeBgColor),
+                    start,
+                    length
+                )
+                i = end + 1
+                continue
+            }
+        }
+        if (i + 1 < len && line[i] == '*' && line[i + 1] == '*') {
+            val end = line.indexOf("**", i + 2)
+            if (end != -1) {
+                val start = length
+                append(line.substring(i + 2, end))
+                addStyle(SpanStyle(fontWeight = FontWeight.Bold), start, length)
+                i = end + 2
+                continue
+            }
+        }
+        if (line[i] == '[') {
+            val closeBracket = line.indexOf(']', i + 1)
+            if (closeBracket != -1 && closeBracket + 1 < len && line[closeBracket + 1] == '(') {
+                val closeParen = line.indexOf(')', closeBracket + 2)
+                if (closeParen != -1) {
+                    val linkText = line.substring(i + 1, closeBracket)
+                    val url = line.substring(closeBracket + 2, closeParen)
+                    val start = length
+                    append(linkText)
+                    addStyle(
+                        SpanStyle(color = primaryColor, textDecoration = TextDecoration.Underline),
+                        start,
+                        length
+                    )
+                    addStringAnnotation("URL", url, start, length)
+                    i = closeParen + 1
+                    continue
+                }
+            }
+        }
 
-private val commonmarkSegmentCache = mutableMapOf<String, List<DocumentSegment>>()
+        append(line[i])
+        i++
+    }
+}
 
 @Composable
 private fun CommonMarkDocumentContent(
@@ -527,76 +289,19 @@ private fun CommonMarkDocumentContent(
     codeBg: Color,
     linkColor: Color,
     quoteColor: Color,
-    textColor: Color
+    textColor: Color,
+    preParsed: List<DocumentSegment>? = null,
+    markdownCache: MutableMap<String, com.mikepenz.markdown.model.MarkdownState>? = null
 ) {
-    val segments = remember(markdown, codeBg, linkColor, quoteColor) {
-        val cacheKey = "${markdown.hashCode()}_${codeBg.hashCode()}_${linkColor.hashCode()}"
-        commonmarkSegmentCache.getOrPut(cacheKey) {
-            val document = commonmarkParser.parse(markdown)
-            val result = mutableListOf<DocumentSegment>()
-            var child = document.firstChild
-            var pendingBuilder: AnnotatedString.Builder? = null
-
-            fun flushText() {
-                pendingBuilder?.let { b ->
-                    var res = b.toAnnotatedString()
-                    while (res.text.endsWith('\n')) {
-                        res = res.subSequence(0, res.text.length - 1)
-                    }
-                    if (res.text.isNotBlank()) {
-                        result.add(DocumentSegment.TextSegment(res))
-                    }
-                    pendingBuilder = null
-                }
-            }
-
-            while (child != null) {
-                when (child) {
-                    is TableBlock -> {
-                        flushText()
-                        result.add(DocumentSegment.TableSegment(child))
-                    }
-                    is FencedCodeBlock -> {
-                        flushText()
-                        result.add(DocumentSegment.CodeSegment(child.literal.trimEnd(), child.info))
-                    }
-                    is IndentedCodeBlock -> {
-                        flushText()
-                        result.add(DocumentSegment.CodeSegment(child.literal.trimEnd(), null))
-                    }
-                    else -> {
-                        val b = pendingBuilder ?: AnnotatedString.Builder().also { pendingBuilder = it }
-                        b.renderCommonMarkNode(child, codeBg, linkColor, quoteColor, isInsideListItem = false)
-                    }
-                }
-                child = child.next
-            }
-            flushText()
-            result
-        }
-    }
-
-    Column {
-        segments.forEachIndexed { idx, seg ->
-            when (seg) {
-                is DocumentSegment.TextSegment -> {
-                    Text(seg.annotated, style = MaterialTheme.typography.bodyMedium, color = textColor)
-                }
-                is DocumentSegment.CodeSegment -> {
-                    CodeBlockComposable(seg.code, seg.info)
-                }
-                is DocumentSegment.TableSegment -> {
-                    MarkdownTableComposable(seg.block, codeBg, linkColor, quoteColor)
-                }
-            }
-            if (idx < segments.lastIndex) {
-                Spacer(Modifier.height(6.dp))
-            }
-        }
-    }
+    val annotated = getOrParseMarkdownAnnotatedString(markdown, linkColor, codeBg)
+    Text(
+        text = annotated,
+        style = MaterialTheme.typography.bodyMedium,
+        color = textColor
+    )
 }
 
-private data class ChatPainters(
+internal data class ChatPainters(
     val bot: Painter,
     val folder: Painter,
     val file: Painter,
@@ -613,8 +318,7 @@ private data class ChatPainters(
 @Composable
 fun SessionDetailScreen(api: OpencodeApi, sessionId: String, sessionTitle: String, directory: String, projectRoot: String, onBack: () -> Unit, onMenuClick: (() -> Unit)? = null, onTitleChange: ((String) -> Unit)? = null) {
     val messages = remember { mutableStateListOf<LegacyWithParts>() }
-    val listState = rememberLazyListState()
-    val displayedMessages = messages
+    val parsedSegments = remember { androidx.compose.runtime.mutableStateMapOf<String, List<DocumentSegment>>() }
     var inputText by remember { mutableStateOf("") }
     var isLoading by remember { mutableStateOf(true) }
     var isSending by remember { mutableStateOf(false) }
@@ -662,18 +366,7 @@ fun SessionDetailScreen(api: OpencodeApi, sessionId: String, sessionTitle: Strin
         isLoading = false
     }
 
-    var prevMessageCount by remember { mutableStateOf(0) }
-    LaunchedEffect(messages.size, isSending, isRunning) {
-        if (messages.isNotEmpty()) {
-            if (prevMessageCount == 0 || messages.size > prevMessageCount) {
-                val totalItems = messages.size + if (isSending || isRunning) 1 else 0
-                if (totalItems > 0) {
-                    listState.scrollToItem(totalItems - 1)
-                }
-            }
-        }
-        prevMessageCount = messages.size
-    }
+
 
     LaunchedEffect(sessionId, directory) {
         val pendingDeltas = mutableMapOf<String, StringBuilder>()
@@ -966,23 +659,17 @@ fun SessionDetailScreen(api: OpencodeApi, sessionId: String, sessionTitle: Strin
                 Box(Modifier.weight(1f).fillMaxWidth()) {
                     if (messages.isEmpty() && !isLoading) Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) { Text(sessionTitle.ifEmpty { "Session" }, style = MaterialTheme.typography.headlineSmall) }
                     else {
-                        LazyColumn(
-                            state = listState,
-                            modifier = Modifier.fillMaxSize().padding(horizontal = 12.dp)
-                        ) {
-                                items(
-                                    items = displayedMessages,
-                                    key = { it.info.id },
-                                    contentType = { it.info.role }
-                                ) { msg ->
-                                    MessageCard(msg, streamingText, projectRoot, chatPainters, markdownCache)
-                                }
-                                if (isSending || isRunning) {
-                                    item(key = "sending_indicator", contentType = "indicator") {
-                                        SendingIndicator()
-                                    }
-                                }
-                            }
+                        ChatMessageList(
+                            modifier = Modifier.fillMaxSize(),
+                            messages = messages,
+                            streamingText = streamingText,
+                            projectRoot = projectRoot,
+                            chatPainters = chatPainters,
+                            markdownCache = markdownCache,
+                            parsedSegments = parsedSegments,
+                            isSending = isSending,
+                            isRunning = isRunning
+                        )
                     }
                 }
                 if (permissionRequests.isNotEmpty() || questionRequests.isNotEmpty()) {
@@ -1052,7 +739,7 @@ fun SessionDetailScreen(api: OpencodeApi, sessionId: String, sessionTitle: Strin
 }
 
 @Composable
-private fun SendingIndicator() {
+internal fun SendingIndicator() {
     Box(Modifier.fillMaxWidth(), contentAlignment = Alignment.Center) {
         Row(
             verticalAlignment = Alignment.CenterVertically,
@@ -1340,106 +1027,136 @@ private fun QuestionPrompt(req: QuestionRequest, api: OpencodeApi, sessionId: St
 }
 
 @Composable
-private fun MessageCard(msg: LegacyWithParts, streamingText: Map<String, String>, projectRoot: String, chatPainters: ChatPainters, markdownCache: MutableMap<String, com.mikepenz.markdown.model.MarkdownState>) {
+internal fun MessageCard(msg: LegacyWithParts, streamingText: Map<String, String>, projectRoot: String, chatPainters: ChatPainters, markdownCache: MutableMap<String, com.mikepenz.markdown.model.MarkdownState>, parsedSegments: Map<String, List<DocumentSegment>>) {
     val parts = remember(msg.parts) { msg.parts.filter { it.type !in listOf("step-start", "step-finish", "snapshot", "patch") } }
     when (msg.info.role) {
-        "user" -> Row(
-            Modifier.fillMaxWidth().padding(top = 8.dp, bottom = 2.dp),
-            horizontalArrangement = Arrangement.End,
-        ) {
-            SelectionContainer {
-                Column(
-                    Modifier
-                        .widthIn(max = 320.dp)
-                        .clip(RoundedCornerShape(16.dp, 4.dp, 16.dp, 16.dp))
-                        .background(MaterialTheme.colorScheme.primaryContainer)
-                        .padding(12.dp),
-                ) {
-                    Text(
-                        parts.filter { it.type == "text" }.joinToString("\n") { it.text ?: "" }
-                            .ifEmpty { "Sent a message" },
-                        style = MaterialTheme.typography.bodyMedium,
-                        color = MaterialTheme.colorScheme.onPrimaryContainer,
-                    )
-                }
-            }
-        }
-        "assistant" -> AssistantCard(msg.info, parts, streamingText, projectRoot, chatPainters, markdownCache)
-        else -> Box(
-            Modifier.fillMaxWidth().padding(vertical = 2.dp),
-            contentAlignment = Alignment.Center,
-        ) {
-            Column(
-                horizontalAlignment = Alignment.CenterHorizontally,
-                modifier = Modifier.padding(vertical = 4.dp),
-            ) {
-                Text(
-                    "System message",
-                    style = MaterialTheme.typography.labelSmall,
-                    color = MaterialTheme.colorScheme.outline,
-                )
-                parts.filter { it.type == "text" && !it.text.isNullOrBlank() }.forEach { part ->
-                    Text(
-                        part.text!!,
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.outline,
-                        modifier = Modifier.padding(top = 2.dp),
-                    )
-                }
-            }
-        }
+        "user" -> UserMessageBubble(parts)
+        "assistant" -> AssistantCard(msg.info, parts, streamingText, projectRoot, chatPainters, markdownCache, parsedSegments)
+        else -> SystemMessageItem(parts)
     }
 }
 
 @Composable
-private fun AssistantCard(info: LegacyInfo, parts: List<LegacyPart>, streamingText: Map<String, String>, projectRoot: String, chatPainters: ChatPainters, markdownCache: MutableMap<String, com.mikepenz.markdown.model.MarkdownState>) {
+private fun AssistantCard(info: LegacyInfo, parts: List<LegacyPart>, streamingText: Map<String, String>, projectRoot: String, chatPainters: ChatPainters, markdownCache: MutableMap<String, com.mikepenz.markdown.model.MarkdownState>, parsedSegments: Map<String, List<DocumentSegment>>) {
     Column(Modifier.fillMaxWidth().padding(start = 8.dp)) {
         if (info.error != null) {
-            Box(
-                Modifier
-                    .fillMaxWidth()
-                    .clip(RoundedCornerShape(12.dp))
-                    .background(MaterialTheme.colorScheme.errorContainer)
-                    .padding(14.dp),
-            ) {
-                Row(verticalAlignment = Alignment.Top) {
-                    Image(chatPainters.alert, null, Modifier.size(22.dp))
-                    Spacer(Modifier.width(10.dp))
-                    Column {
-                        Text(
-                            "Error",
-                            style = MaterialTheme.typography.labelLarge,
-                            color = MaterialTheme.colorScheme.onErrorContainer,
-                        )
-                        Spacer(Modifier.height(4.dp))
-                        Text(
-                            info.error!!.name,
-                            style = MaterialTheme.typography.bodyMedium,
-                            color = MaterialTheme.colorScheme.onErrorContainer,
-                        )
-                    }
-                }
-            }
+            AssistantErrorBanner(info, chatPainters)
         }
         parts.forEach { part ->
             key(part.id) {
-                PartContent(part, streamingText, projectRoot, chatPainters, markdownCache)
+                val streamKey = "${part.messageID}:${part.id}"
+                PartContent(part, streamingText, projectRoot, chatPainters, markdownCache, streamKey, parsedSegments)
+            }
+        }
+    }
+}
+
+/** Flat user message bubble. */
+@Composable
+private fun UserMessageBubble(parts: List<LegacyPart>) {
+    Row(
+        Modifier.fillMaxWidth().padding(top = 8.dp, bottom = 2.dp),
+        horizontalArrangement = Arrangement.End,
+    ) {
+        SelectionContainer {
+            Column(
+                Modifier
+                    .widthIn(max = 320.dp)
+                    .clip(RoundedCornerShape(16.dp, 4.dp, 16.dp, 16.dp))
+                    .background(MaterialTheme.colorScheme.primaryContainer)
+                    .padding(12.dp),
+            ) {
+                Text(
+                    parts.filter { it.type == "text" }.joinToString("\n") { it.text ?: "" }
+                        .ifEmpty { "Sent a message" },
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onPrimaryContainer,
+                )
+            }
+        }
+    }
+}
+
+/** Assistant error banner — emitted as a separate LazyColumn item before parts. */
+@Composable
+private fun AssistantErrorBanner(info: LegacyInfo, chatPainters: ChatPainters) {
+    Box(
+        Modifier
+            .fillMaxWidth()
+            .padding(start = 8.dp)
+            .clip(RoundedCornerShape(12.dp))
+            .background(MaterialTheme.colorScheme.errorContainer)
+            .padding(14.dp),
+    ) {
+        Row(verticalAlignment = Alignment.Top) {
+            Image(chatPainters.alert, null, Modifier.size(22.dp))
+            Spacer(Modifier.width(10.dp))
+            Column {
+                Text(
+                    "Error",
+                    style = MaterialTheme.typography.labelLarge,
+                    color = MaterialTheme.colorScheme.onErrorContainer,
+                )
+                Spacer(Modifier.height(4.dp))
+                Text(
+                    info.error!!.name,
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onErrorContainer,
+                )
+            }
+        }
+    }
+}
+
+/** System/event message — emitted as a single LazyColumn item. */
+@Composable
+private fun SystemMessageItem(parts: List<LegacyPart>) {
+    Box(
+        Modifier.fillMaxWidth().padding(vertical = 2.dp),
+        contentAlignment = Alignment.Center,
+    ) {
+        Column(
+            horizontalAlignment = Alignment.CenterHorizontally,
+            modifier = Modifier.padding(vertical = 4.dp),
+        ) {
+            Text(
+                "System message",
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.outline,
+            )
+            parts.filter { it.type == "text" && !it.text.isNullOrBlank() }.forEach { part ->
+                Text(
+                    part.text!!,
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.outline,
+                    modifier = Modifier.padding(top = 2.dp),
+                )
             }
         }
     }
 }
 
 @Composable
-private fun PartContent(part: LegacyPart, streamingText: Map<String, String>, projectRoot: String, chatPainters: ChatPainters, markdownCache: MutableMap<String, com.mikepenz.markdown.model.MarkdownState>) {
+private fun PartContent(
+    part: LegacyPart,
+    streamingText: Map<String, String>,
+    projectRoot: String,
+    chatPainters: ChatPainters,
+    markdownCache: MutableMap<String, com.mikepenz.markdown.model.MarkdownState>,
+    preParseKey: String = "",
+    parsedSegments: Map<String, List<DocumentSegment>> = emptyMap()
+) {
     when (part.type) {
         "text" -> {
-            val streamKey = "${part.messageID}:${part.id}"
+            val streamKey = preParseKey.ifEmpty { "${part.messageID}:${part.id}" }
             val streamed = streamingText[streamKey]
             val t = remember(part.text, streamed) { (streamed ?: (part.text ?: "")).trimEnd() }
             val codeBg = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.12f)
             val linkColor = MaterialTheme.colorScheme.primary
             val quoteColor = MaterialTheme.colorScheme.outline
             val textColor = MaterialTheme.colorScheme.onSurfaceVariant
+            // Use pre-parsed segments when not streaming
+            val preSegs = if (streamed == null) parsedSegments[streamKey] else null
             Box(
                 Modifier
                     .widthIn(max = 360.dp)
@@ -1448,7 +1165,7 @@ private fun PartContent(part: LegacyPart, streamingText: Map<String, String>, pr
                     .padding(12.dp),
             ) {
                 SelectionContainer {
-                    CommonMarkDocumentContent(t, codeBg, linkColor, quoteColor, textColor)
+                    CommonMarkDocumentContent(t, codeBg, linkColor, quoteColor, textColor, preSegs, markdownCache)
                 }
             }
         }

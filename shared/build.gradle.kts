@@ -46,6 +46,9 @@ kotlin {
             implementation(libs.compose.uiTooling)
             implementation(libs.ktor.client.cio)
             implementation(libs.androidx.activity.compose)
+            implementation(libs.androidx.recyclerview)
+            implementation(libs.commonmark)
+            implementation(libs.commonmark.ext.gfm.tables)
         }
         commonMain.dependencies {
             implementation(libs.compose.runtime)
@@ -65,8 +68,6 @@ kotlin {
             implementation(libs.kotlinx.datetime)
             implementation(libs.multiplatform.markdown.renderer)
             implementation(libs.multiplatform.markdown.renderer.m3)
-            implementation(libs.commonmark)
-            implementation(libs.commonmark.ext.gfm.tables)
         }
         iosMain.dependencies {
             implementation(libs.ktor.client.darwin)
