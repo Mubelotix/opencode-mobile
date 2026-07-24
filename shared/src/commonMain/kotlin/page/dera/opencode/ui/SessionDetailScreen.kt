@@ -6,6 +6,7 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -19,13 +20,17 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
-import androidx.compose.foundation.horizontalScroll
-import androidx.compose.foundation.border
+import androidx.compose.foundation.ExperimentalFoundationApi
+import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.LazyListLayoutInfo
+import androidx.compose.foundation.lazy.LazyListPrefetchScope
+import androidx.compose.foundation.lazy.LazyListPrefetchStrategy
+import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.layout.LazyLayoutPrefetchState
+import androidx.compose.foundation.lazy.layout.NestedPrefetchScope
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
-import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.foundation.lazy.items
-import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardActions
@@ -47,15 +52,16 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.MutableState
+import androidx.compose.runtime.Stable
+import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
-import androidx.compose.runtime.key
 import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.mutableStateMapOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
-import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.focus.FocusRequester
@@ -65,19 +71,12 @@ import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.painter.Painter
-import androidx.compose.ui.text.AnnotatedString
-import androidx.compose.ui.text.SpanStyle
-import androidx.compose.ui.text.buildAnnotatedString
 import androidx.compose.ui.text.font.FontFamily
-import androidx.compose.ui.text.font.FontStyle
-import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.ImeAction
-import androidx.compose.ui.text.style.TextDecoration
 import androidx.compose.ui.text.style.TextOverflow
-import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.unit.sp
+import kotlin.time.Clock
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
@@ -100,32 +99,6 @@ import kotlinx.serialization.json.contentOrNull
 import kotlinx.serialization.json.jsonArray
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
-import com.mikepenz.markdown.m3.Markdown
-import com.mikepenz.markdown.model.rememberMarkdownState
-import org.commonmark.parser.Parser
-import org.commonmark.node.BlockQuote
-import org.commonmark.node.BulletList
-import org.commonmark.node.Code
-import org.commonmark.node.Emphasis
-import org.commonmark.node.HardLineBreak
-import org.commonmark.node.Heading
-import org.commonmark.node.Link
-import org.commonmark.node.ListItem
-import org.commonmark.node.Node
-import org.commonmark.node.OrderedList
-import org.commonmark.node.Paragraph
-import org.commonmark.node.SoftLineBreak
-import org.commonmark.node.StrongEmphasis
-import org.commonmark.node.Text as CommonMarkText
-import org.commonmark.node.FencedCodeBlock
-import org.commonmark.node.IndentedCodeBlock
-import org.commonmark.node.ThematicBreak
-import org.commonmark.ext.gfm.tables.TablesExtension
-import org.commonmark.ext.gfm.tables.TableBlock
-import org.commonmark.ext.gfm.tables.TableHead
-import org.commonmark.ext.gfm.tables.TableBody
-import org.commonmark.ext.gfm.tables.TableRow
-import org.commonmark.ext.gfm.tables.TableCell
 import opencodeapp.shared.generated.resources.globeIcon
 import opencodeapp.shared.generated.resources.searchIcon
 import opencodeapp.shared.generated.resources.sendIcon
@@ -151,451 +124,100 @@ import org.jetbrains.compose.resources.painterResource
 
 private val prettyJson = Json { prettyPrint = true }
 private val urlHostRegex = Regex("://([^/]+)")
+private val hiddenPartTypes = setOf("step-start", "step-finish", "snapshot", "patch")
 
-private val commonmarkParser = Parser.builder()
-    .extensions(listOf(TablesExtension.create()))
-    .build()
+// One MutableState per streaming part: appending a delta only invalidates the
+// composable rendering that part. (A plain SnapshotStateMap<String, String> would
+// recompose every reader of the map — i.e. all visible messages — on every delta.)
+@Stable
+private class StreamingTexts {
+    private val states = mutableStateMapOf<String, MutableState<String>>()
+    fun append(key: String, delta: String) {
+        val state = states.getOrPut(key) { mutableStateOf("") }
+        state.value += delta
+    }
+    fun clear(key: String) { states.remove(key) }
+    fun textOrNull(key: String): String? = states[key]?.value
+    fun isStreaming(key: String): Boolean = states.containsKey(key)
+}
 
-private fun parseCommonMarkToAnnotatedString(
-    markdown: String,
-    codeBg: Color,
-    linkColor: Color,
-    quoteColor: Color
-): AnnotatedString {
-    val document = commonmarkParser.parse(markdown)
-    return buildAnnotatedString {
-        renderCommonMarkNode(document, codeBg, linkColor, quoteColor, isInsideListItem = false)
+// The lazy list works on one row per message part, not per message: items must be
+// small enough to compose within a frame while scrolling.
+private sealed interface ChatRow {
+    val key: String
+    val contentType: String
+}
+private data class UserTextRow(override val key: String, val text: String) : ChatRow {
+    override val contentType get() = "user"
+}
+private data class SystemTextRow(override val key: String, val text: String) : ChatRow {
+    override val contentType get() = "system"
+}
+private data class AssistantErrorRow(override val key: String, val errorName: String) : ChatRow {
+    override val contentType get() = "error"
+}
+// Derived strings are precomputed here so row composition does no JSON digging.
+private data class AssistantPartRow(
+    override val key: String,
+    val part: LegacyPart,
+    val toolLabel: String = "",
+    val matchSuffix: String? = null,
+    val taskDesc: String? = null,
+    val isDirectory: Boolean = false,
+) : ChatRow {
+    override val contentType get() = "${part.type}:${part.tool ?: ""}"
+}
+private data object IndicatorRow : ChatRow {
+    override val key get() = "sending_indicator"
+    override val contentType get() = "indicator"
+}
+
+// The default prefetch strategy composes only 1 item ahead, which a fling
+// outruns instantly with rows this small; when several rows then enter the
+// viewport in one frame, their synchronous composition blows the frame budget
+// and the fling position jumps even further — a jank cascade. Prefetching a
+// deeper window absorbs the fling with idle-time composition.
+@OptIn(ExperimentalFoundationApi::class)
+private class DeepPrefetchStrategy(private val depth: Int) : LazyListPrefetchStrategy {
+    private val handles = mutableMapOf<Int, LazyLayoutPrefetchState.PrefetchHandle>()
+    private var direction = 0
+
+    override fun LazyListPrefetchScope.onScroll(delta: Float, layoutInfo: LazyListLayoutInfo) {
+        if (layoutInfo.visibleItemsInfo.isEmpty()) return
+        val forward = delta < 0f
+        val newDirection = if (forward) 1 else -1
+        if (newDirection != direction) {
+            handles.values.forEach { it.cancel() }
+            handles.clear()
+            direction = newDirection
+        }
+        val first = layoutInfo.visibleItemsInfo.first().index
+        val last = layoutInfo.visibleItemsInfo.last().index
+        val targets = if (forward) (last + 1)..(last + depth) else (first - depth) until first
+        val iterator = handles.iterator()
+        while (iterator.hasNext()) {
+            val entry = iterator.next()
+            if (entry.key < first - depth || entry.key > last + depth) {
+                entry.value.cancel()
+                iterator.remove()
+            }
+        }
+        for (i in targets) {
+            if (i < 0 || i >= layoutInfo.totalItemsCount) continue
+            if (i !in handles) handles[i] = schedulePrefetch(i)
+        }
+    }
+
+    override fun LazyListPrefetchScope.onVisibleItemsUpdated(layoutInfo: LazyListLayoutInfo) {}
+
+    override fun NestedPrefetchScope.onNestedPrefetch(firstVisibleItemIndex: Int) {
+        repeat(2) { schedulePrefetch(firstVisibleItemIndex + it) }
     }
 }
 
-private fun AnnotatedString.Builder.endsWithNewline(): Boolean {
-    val t = toAnnotatedString().text
-    return t.isEmpty() || t.endsWith('\n')
-}
-
-private fun AnnotatedString.Builder.endsWithDoubleNewline(): Boolean {
-    val t = toAnnotatedString().text
-    return t.endsWith("\n\n")
-}
-
-private fun collectTextContent(node: Node, sb: StringBuilder) {
-    var child = node.firstChild
-    while (child != null) {
-        if (child is CommonMarkText) {
-            sb.append(child.literal)
-        } else if (child is Code) {
-            sb.append(child.literal)
-        } else {
-            collectTextContent(child, sb)
-        }
-        child = child.next
-    }
-}
-
-private fun AnnotatedString.Builder.renderCommonMarkNode(
-    node: Node,
-    codeBg: Color,
-    linkColor: Color,
-    quoteColor: Color,
-    isInsideListItem: Boolean = false
-) {
-    when (node) {
-        is Paragraph -> {
-            if (!isInsideListItem) {
-                if (length > 0 && !endsWithNewline()) append("\n")
-                renderChildren(node, codeBg, linkColor, quoteColor, isInsideListItem = false)
-                append("\n\n")
-            } else {
-                renderChildren(node, codeBg, linkColor, quoteColor, isInsideListItem = true)
-            }
-        }
-        is Heading -> {
-            if (length > 0) {
-                if (!endsWithNewline()) append("\n\n") else if (!endsWithDoubleNewline()) append("\n")
-            }
-            val start = length
-            renderChildren(node, codeBg, linkColor, quoteColor, isInsideListItem)
-            val fontSize = when (node.level) {
-                1 -> 20.sp
-                2 -> 18.sp
-                else -> 16.sp
-            }
-            addStyle(SpanStyle(fontWeight = FontWeight.Bold, fontSize = fontSize), start, length)
-            append("\n\n")
-        }
-        is CommonMarkText -> {
-            append(node.literal)
-        }
-        is StrongEmphasis -> {
-            val start = length
-            renderChildren(node, codeBg, linkColor, quoteColor, isInsideListItem)
-            addStyle(SpanStyle(fontWeight = FontWeight.Bold), start, length)
-        }
-        is Emphasis -> {
-            val start = length
-            renderChildren(node, codeBg, linkColor, quoteColor, isInsideListItem)
-            addStyle(SpanStyle(fontStyle = FontStyle.Italic), start, length)
-        }
-        is Code -> {
-            val start = length
-            append(node.literal)
-            addStyle(SpanStyle(fontFamily = FontFamily.Monospace, background = codeBg), start, length)
-        }
-        is Link -> {
-            val start = length
-            renderChildren(node, codeBg, linkColor, quoteColor, isInsideListItem)
-            addStyle(SpanStyle(color = linkColor, textDecoration = TextDecoration.Underline), start, length)
-        }
-        is BulletList -> {
-            if (length > 0 && !endsWithNewline()) append("\n")
-            var item = node.firstChild
-            while (item != null) {
-                if (item is ListItem) {
-                    if (length > 0 && !endsWithNewline()) append("\n")
-                    withStyle(SpanStyle(fontWeight = FontWeight.Bold, color = linkColor)) {
-                        append("• ")
-                    }
-                    renderChildren(item, codeBg, linkColor, quoteColor, isInsideListItem = true)
-                }
-                item = item.next
-            }
-            append("\n\n")
-        }
-        is OrderedList -> {
-            if (length > 0 && !endsWithNewline()) append("\n")
-            var num = node.startNumber
-            var item = node.firstChild
-            while (item != null) {
-                if (item is ListItem) {
-                    if (length > 0 && !endsWithNewline()) append("\n")
-                    withStyle(SpanStyle(fontWeight = FontWeight.Bold, color = linkColor)) {
-                        append("$num. ")
-                    }
-                    num++
-                    renderChildren(item, codeBg, linkColor, quoteColor, isInsideListItem = true)
-                }
-                item = item.next
-            }
-            append("\n\n")
-        }
-        is ListItem -> {
-            renderChildren(node, codeBg, linkColor, quoteColor, isInsideListItem = true)
-        }
-        is BlockQuote -> {
-            if (length > 0 && !endsWithNewline()) append("\n")
-            val start = length
-            renderChildren(node, codeBg, linkColor, quoteColor, isInsideListItem)
-            addStyle(SpanStyle(fontStyle = FontStyle.Italic, color = quoteColor), start, length)
-        }
-        is TableBlock -> {
-            // TableBlock is handled by MarkdownTableComposable
-        }
-        is SoftLineBreak -> {
-            append("\n")
-        }
-        is HardLineBreak -> {
-            append("\n")
-        }
-        is ThematicBreak -> {
-            if (length > 0 && !endsWithNewline()) append("\n")
-            append("───\n")
-        }
-        else -> {
-            renderChildren(node, codeBg, linkColor, quoteColor, isInsideListItem)
-        }
-    }
-}
-
-private fun AnnotatedString.Builder.renderChildren(
-    node: Node,
-    codeBg: Color,
-    linkColor: Color,
-    quoteColor: Color,
-    isInsideListItem: Boolean
-) {
-    var child = node.firstChild
-    while (child != null) {
-        val next = child.next
-        renderCommonMarkNode(child, codeBg, linkColor, quoteColor, isInsideListItem)
-        child = next
-    }
-}
-
-@Composable
-private fun MarkdownTableComposable(
-    tableBlock: TableBlock,
-    codeBg: Color,
-    linkColor: Color,
-    quoteColor: Color
-) {
-    val headerRows = remember(tableBlock) {
-        mutableListOf<List<Node>>().apply {
-            var curr = tableBlock.firstChild
-            while (curr != null) {
-                if (curr is TableHead) {
-                    var r = curr.firstChild
-                    while (r != null) {
-                        if (r is TableRow) {
-                            val cells = mutableListOf<Node>()
-                            var c = r.firstChild
-                            while (c != null) {
-                                if (c is TableCell) cells.add(c)
-                                c = c.next
-                            }
-                            add(cells)
-                        }
-                        r = r.next
-                    }
-                }
-                curr = curr.next
-            }
-        }
-    }
-    val bodyRows = remember(tableBlock) {
-        mutableListOf<List<Node>>().apply {
-            var curr = tableBlock.firstChild
-            while (curr != null) {
-                if (curr is TableBody) {
-                    var r = curr.firstChild
-                    while (r != null) {
-                        if (r is TableRow) {
-                            val cells = mutableListOf<Node>()
-                            var c = r.firstChild
-                            while (c != null) {
-                                if (c is TableCell) cells.add(c)
-                                c = c.next
-                            }
-                            add(cells)
-                        }
-                        r = r.next
-                    }
-                }
-                curr = curr.next
-            }
-        }
-    }
-
-    val numCols = remember(headerRows, bodyRows) {
-        (headerRows + bodyRows).maxOfOrNull { it.size } ?: 0
-    }
-
-    if (numCols == 0) return
-
-    val colWidthsDp = remember(headerRows, bodyRows, numCols) {
-        val allRows = headerRows + bodyRows
-        Array(numCols) { colIdx ->
-            val maxLen = allRows.maxOfOrNull { row ->
-                val cellNode = row.getOrNull(colIdx)
-                if (cellNode != null) {
-                    val sb = StringBuilder()
-                    collectTextContent(cellNode, sb)
-                    sb.length
-                } else 0
-            } ?: 0
-            (maxLen * 9f + 24f).coerceIn(100f, 260f).dp
-        }
-    }
-
-    val horizontalScrollState = rememberScrollState()
-
-    Box(
-        Modifier
-            .fillMaxWidth()
-            .padding(vertical = 6.dp)
-            .clip(RoundedCornerShape(8.dp))
-            .border(BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant), RoundedCornerShape(8.dp))
-            .background(MaterialTheme.colorScheme.surface)
-    ) {
-        Box(Modifier.horizontalScroll(horizontalScrollState)) {
-            Column {
-                headerRows.forEach { row ->
-                    Row(
-                        Modifier
-                            .background(MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.6f))
-                            .padding(vertical = 2.dp)
-                    ) {
-                        for (colIdx in 0 until numCols) {
-                            val cellNode = row.getOrNull(colIdx)
-                            val cellText = remember(cellNode) {
-                                if (cellNode != null) {
-                                    buildAnnotatedString {
-                                        renderCommonMarkNode(cellNode, codeBg, linkColor, quoteColor, true)
-                                    }
-                                } else AnnotatedString("")
-                            }
-                            Box(
-                                Modifier
-                                    .width(colWidthsDp[colIdx])
-                                    .padding(horizontal = 10.dp, vertical = 6.dp),
-                                contentAlignment = Alignment.CenterStart
-                            ) {
-                                Text(
-                                    cellText,
-                                    style = MaterialTheme.typography.bodySmall,
-                                    fontWeight = FontWeight.Bold,
-                                    color = MaterialTheme.colorScheme.onPrimaryContainer
-                                )
-                            }
-                        }
-                    }
-                }
-
-                bodyRows.forEachIndexed { rowIdx, row ->
-                    val bg = if (rowIdx % 2 == 0) MaterialTheme.colorScheme.surface else MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.35f)
-                    Row(
-                        Modifier
-                            .background(bg)
-                            .padding(vertical = 2.dp)
-                    ) {
-                        for (colIdx in 0 until numCols) {
-                            val cellNode = row.getOrNull(colIdx)
-                            val cellText = remember(cellNode) {
-                                if (cellNode != null) {
-                                    buildAnnotatedString {
-                                        renderCommonMarkNode(cellNode, codeBg, linkColor, quoteColor, true)
-                                    }
-                                } else AnnotatedString("")
-                            }
-                            Box(
-                                Modifier
-                                    .width(colWidthsDp[colIdx])
-                                    .padding(horizontal = 10.dp, vertical = 6.dp),
-                                contentAlignment = Alignment.CenterStart
-                            ) {
-                                Text(
-                                    cellText,
-                                    style = MaterialTheme.typography.bodySmall,
-                                    color = MaterialTheme.colorScheme.onSurface
-                                )
-                            }
-                        }
-                    }
-                }
-            }
-        }
-    }
-}
-
-@Composable
-private fun CodeBlockComposable(
-    code: String,
-    info: String?
-) {
-    val displayCode = remember(code) {
-        if (code.length > 3000) code.take(3000) + "\n... (truncated for preview)" else code
-    }
-    Box(
-        Modifier
-            .fillMaxWidth()
-            .padding(vertical = 4.dp)
-            .clip(RoundedCornerShape(8.dp))
-            .background(Color(0xFF1E1E2E))
-            .padding(10.dp)
-    ) {
-        Column {
-            if (!info.isNullOrBlank()) {
-                Text(
-                    info.trim(),
-                    style = MaterialTheme.typography.labelSmall,
-                    color = MaterialTheme.colorScheme.outline,
-                    modifier = Modifier.padding(bottom = 4.dp)
-                )
-            }
-            Text(
-                displayCode,
-                style = TextStyle(
-                    fontFamily = FontFamily.Monospace,
-                    fontSize = 13.sp,
-                    color = Color(0xFFCDD6F4)
-                )
-            )
-        }
-    }
-}
-
-private sealed class DocumentSegment {
-    data class TextSegment(val annotated: AnnotatedString) : DocumentSegment()
-    data class CodeSegment(val code: String, val info: String?) : DocumentSegment()
-    data class TableSegment(val block: TableBlock) : DocumentSegment()
-}
-
-private val commonmarkSegmentCache = mutableMapOf<String, List<DocumentSegment>>()
-
-@Composable
-private fun CommonMarkDocumentContent(
-    markdown: String,
-    codeBg: Color,
-    linkColor: Color,
-    quoteColor: Color,
-    textColor: Color
-) {
-    val segments = remember(markdown, codeBg, linkColor, quoteColor) {
-        val cacheKey = "${markdown.hashCode()}_${codeBg.hashCode()}_${linkColor.hashCode()}"
-        commonmarkSegmentCache.getOrPut(cacheKey) {
-            val document = commonmarkParser.parse(markdown)
-            val result = mutableListOf<DocumentSegment>()
-            var child = document.firstChild
-            var pendingBuilder: AnnotatedString.Builder? = null
-
-            fun flushText() {
-                pendingBuilder?.let { b ->
-                    var res = b.toAnnotatedString()
-                    while (res.text.endsWith('\n')) {
-                        res = res.subSequence(0, res.text.length - 1)
-                    }
-                    if (res.text.isNotBlank()) {
-                        result.add(DocumentSegment.TextSegment(res))
-                    }
-                    pendingBuilder = null
-                }
-            }
-
-            while (child != null) {
-                when (child) {
-                    is TableBlock -> {
-                        flushText()
-                        result.add(DocumentSegment.TableSegment(child))
-                    }
-                    is FencedCodeBlock -> {
-                        flushText()
-                        result.add(DocumentSegment.CodeSegment(child.literal.trimEnd(), child.info))
-                    }
-                    is IndentedCodeBlock -> {
-                        flushText()
-                        result.add(DocumentSegment.CodeSegment(child.literal.trimEnd(), null))
-                    }
-                    else -> {
-                        val b = pendingBuilder ?: AnnotatedString.Builder().also { pendingBuilder = it }
-                        b.renderCommonMarkNode(child, codeBg, linkColor, quoteColor, isInsideListItem = false)
-                    }
-                }
-                child = child.next
-            }
-            flushText()
-            result
-        }
-    }
-
-    Column {
-        segments.forEachIndexed { idx, seg ->
-            when (seg) {
-                is DocumentSegment.TextSegment -> {
-                    Text(seg.annotated, style = MaterialTheme.typography.bodyMedium, color = textColor)
-                }
-                is DocumentSegment.CodeSegment -> {
-                    CodeBlockComposable(seg.code, seg.info)
-                }
-                is DocumentSegment.TableSegment -> {
-                    MarkdownTableComposable(seg.block, codeBg, linkColor, quoteColor)
-                }
-            }
-            if (idx < segments.lastIndex) {
-                Spacer(Modifier.height(6.dp))
-            }
-        }
-    }
-}
-
+// Resolved once per screen; painterResource machinery per row measurably added
+// to composition time. data class so remembered painter instances compare equal
+// and rows keep skipping.
 private data class ChatPainters(
     val bot: Painter,
     val folder: Painter,
@@ -606,15 +228,51 @@ private data class ChatPainters(
     val terminal: Painter,
     val invalid: Painter,
     val brain: Painter,
-    val alert: Painter
+    val alert: Painter,
 )
+
+// Newest row first, because the list uses reverseLayout.
+private fun buildRows(messages: List<LegacyWithParts>, showIndicator: Boolean, projectRoot: String): List<ChatRow> = Perf.timed("buildRows msgs=${messages.size}", thresholdMs = 1.0) {
+    val rows = ArrayList<ChatRow>(messages.size * 2 + 1)
+    for (msg in messages) {
+        val parts = msg.parts.filter { it.type !in hiddenPartTypes }
+        when (msg.info.role) {
+            "user" -> rows.add(UserTextRow(
+                "u:${msg.info.id}",
+                parts.filter { it.type == "text" }.joinToString("\n") { it.text ?: "" }.ifEmpty { "Sent a message" },
+            ))
+            "assistant" -> {
+                if (msg.info.error != null) rows.add(AssistantErrorRow("e:${msg.info.id}", msg.info.error!!.name))
+                parts.forEach { p ->
+                    rows.add(
+                        if (p.type == "tool") AssistantPartRow(
+                            "p:${msg.info.id}:${p.id}", p,
+                            toolLabel = toolLabel(p, projectRoot),
+                            matchSuffix = matchCount(p),
+                            taskDesc = if (p.tool == "task") taskDescription(p) else null,
+                            isDirectory = if (p.tool == "read") isDirectoryRead(p) else false,
+                        )
+                        else AssistantPartRow("p:${msg.info.id}:${p.id}", p)
+                    )
+                }
+            }
+            else -> rows.add(SystemTextRow(
+                "s:${msg.info.id}",
+                parts.filter { it.type == "text" && !it.text.isNullOrBlank() }.joinToString("\n") { it.text!! },
+            ))
+        }
+    }
+    if (showIndicator) rows.add(IndicatorRow)
+    rows.reverse()
+    rows
+}
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun SessionDetailScreen(api: OpencodeApi, sessionId: String, sessionTitle: String, directory: String, projectRoot: String, onBack: () -> Unit, onMenuClick: (() -> Unit)? = null, onTitleChange: ((String) -> Unit)? = null) {
     val messages = remember { mutableStateListOf<LegacyWithParts>() }
-    val listState = rememberLazyListState()
-    val displayedMessages = messages
+    @OptIn(ExperimentalFoundationApi::class)
+    val listState = rememberLazyListState(prefetchStrategy = remember { DeepPrefetchStrategy(depth = 8) })
     var inputText by remember { mutableStateOf("") }
     var isLoading by remember { mutableStateOf(true) }
     var isSending by remember { mutableStateOf(false) }
@@ -628,6 +286,34 @@ fun SessionDetailScreen(api: OpencodeApi, sessionId: String, sessionTitle: Strin
     var titleWasFocused by remember { mutableStateOf(false) }
     val titleFocusRequester = remember { FocusRequester() }
 
+    LaunchedEffect(isEditingTitle) {
+        if (isEditingTitle) {
+            editTitleText = currentTitle
+            titleWasFocused = false
+            titleFocusRequester.requestFocus()
+        }
+    }
+    val streamingText = remember { StreamingTexts() }
+    val permissionRequests = remember { mutableStateListOf<PermissionRequest>() }
+    val questionRequests = remember { mutableStateListOf<QuestionRequest>() }
+    var selectedTab by remember { mutableStateOf(0) }
+    val scope = rememberCoroutineScope()
+
+    LaunchedEffect(sessionId) {
+        isLoading = true
+        permissionRequests.clear()
+        val t0 = Perf.clock.markNow()
+        api.getSessionMessages(sessionId).onSuccess {
+            val fetchMs = Perf.ms(t0)
+            Perf.timed("initial-load apply msgs=${it.size} parts=${it.sumOf { m -> m.parts.size }} fetch=${fetchMs}ms") {
+                messages.clear(); messages.addAll(it)
+            }
+        }.onFailure { errorText = it.message }
+        isLoading = false
+    }
+
+    val rows by remember { derivedStateOf { buildRows(messages, isSending || isRunning, projectRoot) } }
+
     val chatPainters = ChatPainters(
         bot = painterResource(botIcon),
         folder = painterResource(Res.drawable.folder),
@@ -638,49 +324,31 @@ fun SessionDetailScreen(api: OpencodeApi, sessionId: String, sessionTitle: Strin
         terminal = painterResource(Res.drawable.terminal),
         invalid = painterResource(circleXIcon),
         brain = painterResource(brainIcon),
-        alert = painterResource(Res.drawable.triangle_alert)
+        alert = painterResource(Res.drawable.triangle_alert),
     )
-    val markdownCache = remember { mutableMapOf<String, com.mikepenz.markdown.model.MarkdownState>() }
 
-    LaunchedEffect(isEditingTitle) {
-        if (isEditingTitle) {
-            editTitleText = currentTitle
-            titleWasFocused = false
-            titleFocusRequester.requestFocus()
-        }
-    }
-    val streamingText = remember { mutableStateMapOf<String, String>() }
-    val permissionRequests = remember { mutableStateListOf<PermissionRequest>() }
-    val questionRequests = remember { mutableStateListOf<QuestionRequest>() }
-    var selectedTab by remember { mutableStateOf(0) }
-    val scope = rememberCoroutineScope()
-
-    LaunchedEffect(sessionId) {
-        isLoading = true
-        permissionRequests.clear()
-        api.getSessionMessages(sessionId).onSuccess { messages.clear(); messages.addAll(it) }.onFailure { errorText = it.message }
-        isLoading = false
-    }
-
-    var prevMessageCount by remember { mutableStateOf(0) }
-    LaunchedEffect(messages.size, isSending, isRunning) {
-        if (messages.isNotEmpty()) {
-            if (prevMessageCount == 0 || messages.size > prevMessageCount) {
-                val totalItems = messages.size + if (isSending || isRunning) 1 else 0
-                if (totalItems > 0) {
-                    listState.scrollToItem(totalItems - 1)
-                }
+    // reverseLayout keeps the viewport pinned to the bottom while the newest row
+    // grows; jump back down when a new row arrives, unless the user scrolled away.
+    val newestRowKey = rows.firstOrNull()?.key
+    LaunchedEffect(newestRowKey) {
+        if (newestRowKey != null && listState.firstVisibleItemIndex <= 1) {
+            Perf.timed("scrollToItem(0) key=$newestRowKey") {
+                listState.scrollToItem(0)
             }
         }
-        prevMessageCount = messages.size
     }
+
+    FrameStatsLogger()
+    ScrollStatsLogger(listState)
 
     LaunchedEffect(sessionId, directory) {
         val pendingDeltas = mutableMapOf<String, StringBuilder>()
         var flushJob: Job? = null
         fun flushDeltas() {
-            pendingDeltas.forEach { (k, sb) -> streamingText[k] = (streamingText[k] ?: "") + sb.toString() }
-            pendingDeltas.clear()
+            Perf.timed("flushDeltas n=${pendingDeltas.size}", thresholdMs = 1.0) {
+                pendingDeltas.forEach { (k, sb) -> streamingText.append(k, sb.toString()) }
+                pendingDeltas.clear()
+            }
         }
         try {
             println("OC_DBG: SSE collect started session=$sessionId")
@@ -706,9 +374,10 @@ fun SessionDetailScreen(api: OpencodeApi, sessionId: String, sessionTitle: Strin
                         flushJob = null
                         when (evType) {
                             "message.part.updated" -> {
+                            val t0 = Perf.clock.markNow()
                             val p = props["part"]?.jsonObject ?: return@collect
                             val k = "${p["messageID"]?.jsonPrimitive?.content}:${p["id"]?.jsonPrimitive?.content}"
-                            streamingText.remove(k)
+                            streamingText.clear(k)
                             val part = try { Json { ignoreUnknownKeys = true; coerceInputValues = true }.decodeFromJsonElement(LegacyPart.serializer(), p) } catch (_: Exception) { return@collect }
                             val mi = messages.indexOfFirst { it.info.id == p["messageID"]?.jsonPrimitive?.content }
                             if (mi >= 0) {
@@ -717,6 +386,8 @@ fun SessionDetailScreen(api: OpencodeApi, sessionId: String, sessionTitle: Strin
                             if (pi >= 0) mp[pi] = part else mp.add(part)
                             messages[mi] = LegacyWithParts(messages[mi].info, mp)
                         }
+                            val elapsed = Perf.ms(t0)
+                            if (elapsed >= 1.0) println("OC_PERF: part.updated type=${part.type} textLen=${part.text?.length ?: 0} took=${elapsed}ms")
                         }
                         "message.updated" -> {
                             val infoJson = props["info"]?.jsonObject ?: return@collect
@@ -729,8 +400,10 @@ fun SessionDetailScreen(api: OpencodeApi, sessionId: String, sessionTitle: Strin
                             println("OC_DBG: session.idle $sid, msgs before=${messages.size}")
                             isRunning = false
                             api.getSessionMessages(sessionId).onSuccess { fresh ->
-                                messages.removeAll { !it.info.id.startsWith("evt_") }
-                                fresh.forEach { f -> if (messages.none { m -> m.info.id == f.info.id }) messages.add(f) }
+                                Perf.timed("session.idle refresh msgs=${fresh.size}") {
+                                    messages.removeAll { !it.info.id.startsWith("evt_") }
+                                    fresh.forEach { f -> if (messages.none { m -> m.info.id == f.info.id }) messages.add(f) }
+                                }
                                 println("OC_DBG: session.idle done, msgs after=${messages.size}")
                             }
                         }
@@ -945,10 +618,11 @@ fun SessionDetailScreen(api: OpencodeApi, sessionId: String, sessionTitle: Strin
         },
     ) { padding ->
         Box(Modifier.fillMaxSize().padding(padding)) {
-            if (selectedTab == 0) {
-                Column(
-                    Modifier.fillMaxSize()
-                ) {
+            Column(
+                Modifier.fillMaxSize()
+                    .imePadding()
+                    .then(if (selectedTab == 0) Modifier else Modifier.alpha(0f))
+            ) {
                 if (errorText != null) {
                     Box(
                         Modifier
@@ -968,21 +642,19 @@ fun SessionDetailScreen(api: OpencodeApi, sessionId: String, sessionTitle: Strin
                     else {
                         LazyColumn(
                             state = listState,
-                            modifier = Modifier.fillMaxSize().padding(horizontal = 12.dp)
+                            reverseLayout = true,
+                            modifier = Modifier.fillMaxSize(),
+                            contentPadding = PaddingValues(horizontal = 12.dp, vertical = 8.dp),
                         ) {
-                                items(
-                                    items = displayedMessages,
-                                    key = { it.info.id },
-                                    contentType = { it.info.role }
-                                ) { msg ->
-                                    MessageCard(msg, streamingText, projectRoot, chatPainters, markdownCache)
-                                }
-                                if (isSending || isRunning) {
-                                    item(key = "sending_indicator", contentType = "indicator") {
-                                        SendingIndicator()
-                                    }
+                            items(rows, key = { it.key }, contentType = { it.contentType }) { row ->
+                                Box(Modifier.timedMeasure(row.key, thresholdMs = 4.0)) {
+                                    val t0 = Perf.clock.markNow()
+                                    ChatRowContent(row, streamingText, chatPainters)
+                                    val elapsed = Perf.ms(t0)
+                                    if (elapsed >= 2.0) println("OC_PERF: compose row=${row.key} type=${row.contentType} took=${elapsed}ms")
                                 }
                             }
+                        }
                     }
                 }
                 if (permissionRequests.isNotEmpty() || questionRequests.isNotEmpty()) {
@@ -1012,7 +684,7 @@ fun SessionDetailScreen(api: OpencodeApi, sessionId: String, sessionTitle: Strin
                         }
                     }
                 }
-                Row(Modifier.fillMaxWidth().imePadding().padding(horizontal = 12.dp, vertical = 8.dp), verticalAlignment = Alignment.Bottom) {
+                Row(Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 8.dp), verticalAlignment = Alignment.Bottom) {
                     OutlinedTextField(
                         value = inputText, onValueChange = { inputText = it }, modifier = Modifier.weight(1f),
                         placeholder = { Text("Type a message...") }, maxLines = 4,
@@ -1030,7 +702,7 @@ fun SessionDetailScreen(api: OpencodeApi, sessionId: String, sessionTitle: Strin
                             .clickable(enabled = inputText.isNotBlank() && !isSending) { doSend() }
                     )
                 }
-                }}
+            }
             if (selectedTab != 0) {
                 Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
                     Text(
@@ -1069,28 +741,36 @@ private fun SendingIndicator() {
     }
 }
 
-@Composable private fun ReasoningPart(part: LegacyPart, streamingText: Map<String, String>, chatPainters: ChatPainters) {
-    val key = remember(part.messageID, part.id) { "${part.messageID}:${part.id}" }
-    val isStreaming = streamingText.containsKey(key)
-    val t = remember(streamingText[key], part.text) { streamingText[key] ?: (part.text ?: "") }
+@Composable private fun ReasoningPart(part: LegacyPart, streamingText: StreamingTexts, painters: ChatPainters) {
+    val key = "${part.messageID}:${part.id}"
+    val isStreaming = streamingText.isStreaming(key)
+    val t = streamingText.textOrNull(key) ?: (part.text ?: "")
     var expanded by remember { mutableStateOf(false) }
-    val headerText = remember(isStreaming) {
-        if (isStreaming) "Thinking..." else "Thought"
+    val startTimes = remember { mutableStateMapOf<String, Long>() }
+    val finalDurations = remember { mutableStateMapOf<String, String>() }
+    if (isStreaming && !startTimes.containsKey(key)) {
+        startTimes[key] = Clock.System.now().toEpochMilliseconds()
+        finalDurations.remove(key)
     }
-    Row(
-        Modifier.fillMaxWidth().padding(vertical = 2.dp).clickable { expanded = !expanded },
-        verticalAlignment = Alignment.CenterVertically
-    ) {
-        Image(chatPainters.brain, null, Modifier.size(14.dp))
+    val startTime = startTimes[key]
+    if (!isStreaming && startTime != null && !finalDurations.containsKey(key)) {
+        val totalMs = Clock.System.now().toEpochMilliseconds() - startTime
+        finalDurations[key] = if (totalMs < 1000) "Thought for ${totalMs}ms"
+        else "Thought for ${thinkingDurationSeconds(totalMs)}"
+    }
+    val headerText = if (isStreaming) {
+        val elapsed = startTime?.let { Clock.System.now().toEpochMilliseconds() - it } ?: 0
+        if (elapsed < 1000) "Thinking for ${elapsed}ms" else "Thinking for ${thinkingDurationText(elapsed)}s"
+    } else finalDurations[key] ?: "Thought"
+    Row(Modifier.fillMaxWidth().padding(vertical = 2.dp).clickable { expanded = !expanded }, verticalAlignment = Alignment.CenterVertically) {
+        Image(painters.brain, null, Modifier.size(14.dp))
         Spacer(Modifier.width(4.dp))
         Text(headerText, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
     }
     if (expanded && t.isNotBlank()) {
-        Box(
-            Modifier.fillMaxWidth().padding(vertical = 2.dp).clip(RoundedCornerShape(8.dp))
-                .background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = .5f)).padding(8.dp)
-        ) {
-            Text(t, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        Box(Modifier.fillMaxWidth().padding(vertical = 2.dp).clip(RoundedCornerShape(8.dp))
+            .background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = .5f)).padding(8.dp)) {
+            Text(truncateForDisplay(t), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
         }
     }
 }
@@ -1340,32 +1020,58 @@ private fun QuestionPrompt(req: QuestionRequest, api: OpencodeApi, sessionId: St
 }
 
 @Composable
-private fun MessageCard(msg: LegacyWithParts, streamingText: Map<String, String>, projectRoot: String, chatPainters: ChatPainters, markdownCache: MutableMap<String, com.mikepenz.markdown.model.MarkdownState>) {
-    val parts = remember(msg.parts) { msg.parts.filter { it.type !in listOf("step-start", "step-finish", "snapshot", "patch") } }
-    when (msg.info.role) {
-        "user" -> Row(
+private fun ChatRowContent(row: ChatRow, streamingText: StreamingTexts, painters: ChatPainters) {
+    when (row) {
+        is UserTextRow -> Row(
             Modifier.fillMaxWidth().padding(top = 8.dp, bottom = 2.dp),
             horizontalArrangement = Arrangement.End,
         ) {
-            SelectionContainer {
-                Column(
-                    Modifier
-                        .widthIn(max = 320.dp)
-                        .clip(RoundedCornerShape(16.dp, 4.dp, 16.dp, 16.dp))
-                        .background(MaterialTheme.colorScheme.primaryContainer)
-                        .padding(12.dp),
-                ) {
+            Column(
+                Modifier
+                    .widthIn(max = 320.dp)
+                    .clip(RoundedCornerShape(16.dp, 4.dp, 16.dp, 16.dp))
+                    .background(MaterialTheme.colorScheme.primaryContainer)
+                    .padding(12.dp),
+            ) {
+                SelectionContainer {
                     Text(
-                        parts.filter { it.type == "text" }.joinToString("\n") { it.text ?: "" }
-                            .ifEmpty { "Sent a message" },
+                        row.text,
                         style = MaterialTheme.typography.bodyMedium,
                         color = MaterialTheme.colorScheme.onPrimaryContainer,
                     )
                 }
             }
         }
-        "assistant" -> AssistantCard(msg.info, parts, streamingText, projectRoot, chatPainters, markdownCache)
-        else -> Box(
+        is AssistantErrorRow -> Box(
+            Modifier
+                .fillMaxWidth()
+                .padding(start = 8.dp)
+                .clip(RoundedCornerShape(12.dp))
+                .background(MaterialTheme.colorScheme.errorContainer)
+                .padding(14.dp),
+        ) {
+            Row(verticalAlignment = Alignment.Top) {
+                Image(painters.alert, null, Modifier.size(22.dp))
+                Spacer(Modifier.width(10.dp))
+                Column {
+                    Text(
+                        "Error",
+                        style = MaterialTheme.typography.labelLarge,
+                        color = MaterialTheme.colorScheme.onErrorContainer,
+                    )
+                    Spacer(Modifier.height(4.dp))
+                    Text(
+                        row.errorName,
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.onErrorContainer,
+                    )
+                }
+            }
+        }
+        is AssistantPartRow -> Box(Modifier.fillMaxWidth().padding(start = 8.dp)) {
+            PartContent(row, streamingText, painters)
+        }
+        is SystemTextRow -> Box(
             Modifier.fillMaxWidth().padding(vertical = 2.dp),
             contentAlignment = Alignment.Center,
         ) {
@@ -1378,9 +1084,9 @@ private fun MessageCard(msg: LegacyWithParts, streamingText: Map<String, String>
                     style = MaterialTheme.typography.labelSmall,
                     color = MaterialTheme.colorScheme.outline,
                 )
-                parts.filter { it.type == "text" && !it.text.isNullOrBlank() }.forEach { part ->
+                if (row.text.isNotBlank()) {
                     Text(
-                        part.text!!,
+                        row.text,
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.outline,
                         modifier = Modifier.padding(top = 2.dp),
@@ -1388,58 +1094,17 @@ private fun MessageCard(msg: LegacyWithParts, streamingText: Map<String, String>
                 }
             }
         }
+        IndicatorRow -> SendingIndicator()
     }
 }
 
 @Composable
-private fun AssistantCard(info: LegacyInfo, parts: List<LegacyPart>, streamingText: Map<String, String>, projectRoot: String, chatPainters: ChatPainters, markdownCache: MutableMap<String, com.mikepenz.markdown.model.MarkdownState>) {
-    Column(Modifier.fillMaxWidth().padding(start = 8.dp)) {
-        if (info.error != null) {
-            Box(
-                Modifier
-                    .fillMaxWidth()
-                    .clip(RoundedCornerShape(12.dp))
-                    .background(MaterialTheme.colorScheme.errorContainer)
-                    .padding(14.dp),
-            ) {
-                Row(verticalAlignment = Alignment.Top) {
-                    Image(chatPainters.alert, null, Modifier.size(22.dp))
-                    Spacer(Modifier.width(10.dp))
-                    Column {
-                        Text(
-                            "Error",
-                            style = MaterialTheme.typography.labelLarge,
-                            color = MaterialTheme.colorScheme.onErrorContainer,
-                        )
-                        Spacer(Modifier.height(4.dp))
-                        Text(
-                            info.error!!.name,
-                            style = MaterialTheme.typography.bodyMedium,
-                            color = MaterialTheme.colorScheme.onErrorContainer,
-                        )
-                    }
-                }
-            }
-        }
-        parts.forEach { part ->
-            key(part.id) {
-                PartContent(part, streamingText, projectRoot, chatPainters, markdownCache)
-            }
-        }
-    }
-}
-
-@Composable
-private fun PartContent(part: LegacyPart, streamingText: Map<String, String>, projectRoot: String, chatPainters: ChatPainters, markdownCache: MutableMap<String, com.mikepenz.markdown.model.MarkdownState>) {
+private fun PartContent(row: AssistantPartRow, streamingText: StreamingTexts, painters: ChatPainters) {
+    val part = row.part
     when (part.type) {
         "text" -> {
-            val streamKey = "${part.messageID}:${part.id}"
-            val streamed = streamingText[streamKey]
-            val t = remember(part.text, streamed) { (streamed ?: (part.text ?: "")).trimEnd() }
-            val codeBg = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.12f)
-            val linkColor = MaterialTheme.colorScheme.primary
-            val quoteColor = MaterialTheme.colorScheme.outline
-            val textColor = MaterialTheme.colorScheme.onSurfaceVariant
+            val streamed = streamingText.textOrNull("${part.messageID}:${part.id}")
+            val t = (streamed ?: part.text ?: "").trimEnd()
             Box(
                 Modifier
                     .widthIn(max = 360.dp)
@@ -1448,12 +1113,12 @@ private fun PartContent(part: LegacyPart, streamingText: Map<String, String>, pr
                     .padding(12.dp),
             ) {
                 SelectionContainer {
-                    CommonMarkDocumentContent(t, codeBg, linkColor, quoteColor, textColor)
+                    MarkdownText(t, cacheable = streamed == null)
                 }
             }
         }
-        "reasoning" -> ReasoningPart(part, streamingText, chatPainters)
-        "tool" -> ToolPart(part, projectRoot, chatPainters)
+        "reasoning" -> ReasoningPart(part, streamingText, painters)
+        "tool" -> ToolPart(row, painters)
         "compaction" -> Box(
             Modifier.fillMaxWidth(),
             contentAlignment = Alignment.Center,
@@ -1465,15 +1130,15 @@ private fun PartContent(part: LegacyPart, streamingText: Map<String, String>, pr
                 modifier = Modifier.padding(vertical = 4.dp),
             )
         }
-        "agent" -> AgentPart(part, chatPainters)
+        "agent" -> AgentPart(part, painters)
     }
 }
 
-@Composable private fun AgentPart(part: LegacyPart, chatPainters: ChatPainters) {
+@Composable private fun AgentPart(part: LegacyPart, painters: ChatPainters) {
     val label = part.name?.let { "Launched $it" } ?: "Launched agent"
     val sub = part.description?.takeIf { it.isNotBlank() } ?: part.title?.takeIf { it.isNotBlank() }
     Row(Modifier.padding(vertical = 2.dp).clip(RoundedCornerShape(8.dp)).background(MaterialTheme.colorScheme.surfaceVariant).padding(10.dp), verticalAlignment = Alignment.CenterVertically) {
-        Image(chatPainters.bot, null, Modifier.size(14.dp))
+        Image(painters.bot, null, Modifier.size(14.dp))
         Spacer(Modifier.width(8.dp))
         Column {
             Text(label, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
@@ -1486,25 +1151,19 @@ private fun PartContent(part: LegacyPart, streamingText: Map<String, String>, pr
 }
 
 @Composable
-private fun ToolPart(part: LegacyPart, projectRoot: String, chatPainters: ChatPainters) {
-    val outlineColor = MaterialTheme.colorScheme.outline
-    val tertiaryColor = MaterialTheme.colorScheme.tertiary
-    val primaryColor = MaterialTheme.colorScheme.primary
-    val errorColor = MaterialTheme.colorScheme.error
-    val status = part.state?.status
-    val tc = remember(status, outlineColor, tertiaryColor, primaryColor, errorColor) {
-        when (status) {
-            "pending" -> outlineColor
-            "running" -> tertiaryColor
-            "completed" -> primaryColor
-            "error" -> errorColor
-            else -> outlineColor
-        }
+private fun ToolPart(row: AssistantPartRow, painters: ChatPainters) {
+    val part = row.part
+    val tc = when (part.state?.status) {
+        "pending" -> MaterialTheme.colorScheme.outline
+        "running" -> MaterialTheme.colorScheme.tertiary
+        "completed" -> MaterialTheme.colorScheme.primary
+        "error" -> MaterialTheme.colorScheme.error
+        else -> MaterialTheme.colorScheme.outline
     }
-    val label = remember(part.id) { toolLabel(part, projectRoot) }
-    val matchSuffix = remember(part.id) { matchCount(part) }
+    val label = row.toolLabel
+    val matchSuffix = row.matchSuffix
     if (part.tool == "task") {
-        val desc = remember(part.id) { taskDescription(part) }
+        val desc = row.taskDesc
         Row(
             Modifier
                 .padding(vertical = 2.dp)
@@ -1513,7 +1172,7 @@ private fun ToolPart(part: LegacyPart, projectRoot: String, chatPainters: ChatPa
                 .padding(10.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
-            Image(chatPainters.bot, null, Modifier.size(14.dp))
+            Image(painters.bot, null, Modifier.size(14.dp))
             Spacer(Modifier.width(8.dp))
             Column(Modifier.weight(1f)) {
                 Text(
@@ -1544,7 +1203,7 @@ private fun ToolPart(part: LegacyPart, projectRoot: String, chatPainters: ChatPa
         ) {
             Column {
                 Row(verticalAlignment = Alignment.CenterVertically) {
-                    Image(chatPainters.terminal, null, Modifier.size(14.dp))
+                    Image(painters.terminal, null, Modifier.size(14.dp))
                     Spacer(Modifier.width(6.dp))
                     Text(
                         label,
@@ -1576,14 +1235,13 @@ private fun ToolPart(part: LegacyPart, projectRoot: String, chatPainters: ChatPa
     } else {
         var expanded by remember { mutableStateOf(false) }
         val isExpandable = part.tool in setOf("websearch", "webfetch", "question", "invalid", "read", "write", "edit")
-        val isDirectory = remember(part.id) { isDirectoryRead(part) }
-        val iconPainter = when {
-            part.tool == "invalid" -> chatPainters.invalid
-            part.tool == "read" && isDirectory -> chatPainters.folder
-            part.tool in listOf("glob", "grep") -> chatPainters.search
-            part.tool == "question" -> chatPainters.question
-            part.tool in listOf("websearch", "webfetch") -> chatPainters.globe
-            else -> chatPainters.file
+        val icon = when {
+            part.tool == "invalid" -> painters.invalid
+            part.tool == "read" && row.isDirectory -> painters.folder
+            part.tool in listOf("glob", "grep") -> painters.search
+            part.tool == "question" -> painters.question
+            part.tool in listOf("websearch", "webfetch") -> painters.globe
+            else -> painters.file
         }
         Column {
             Row(
@@ -1593,7 +1251,7 @@ private fun ToolPart(part: LegacyPart, projectRoot: String, chatPainters: ChatPa
                     .padding(vertical = 2.dp),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
-                Image(iconPainter, null, Modifier.size(14.dp))
+                Image(icon, null, Modifier.size(14.dp))
                 Spacer(Modifier.width(4.dp))
                 Text(
                     label,
@@ -1634,37 +1292,35 @@ private fun ToolPart(part: LegacyPart, projectRoot: String, chatPainters: ChatPa
                         .padding(8.dp),
                 ) {
                     Column {
-                        val inputObj = when (val s = part.state) {
-                            is LegacyToolState.Pending -> s.input
-                            is LegacyToolState.Running -> s.input
-                            is LegacyToolState.Completed -> s.input
-                            is LegacyToolState.Error -> s.input
-                            null -> null
-                        }
-                        if (inputObj != null) {
-                            val inputStr = remember(part.id) {
-                                val raw = try { prettyJson.encodeToString(JsonElement.serializer(), inputObj) } catch (_: Exception) { "" }
-                                if (raw.length > 3000) raw.take(3000) + "\n... (truncated)" else raw
+                        val inputPretty = remember(part) {
+                            val inputObj = when (val s = part.state) {
+                                is LegacyToolState.Pending -> s.input
+                                is LegacyToolState.Running -> s.input
+                                is LegacyToolState.Completed -> s.input
+                                is LegacyToolState.Error -> s.input
+                                null -> null
                             }
+                            inputObj?.let { truncateForDisplay(prettyJson.encodeToString(JsonElement.serializer(), it)) }
+                        }
+                        if (inputPretty != null) {
                             Text(
-                                inputStr,
+                                inputPretty,
                                 style = MaterialTheme.typography.bodySmall,
                                 fontFamily = FontFamily.Monospace,
                                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                             )
                         }
-                        val output = when (val s = part.state) {
-                            is LegacyToolState.Completed -> s.output.takeIf { it.isNotBlank() }
-                            is LegacyToolState.Error -> s.error.takeIf { it.isNotBlank() }
-                            else -> null
+                        val output = remember(part) {
+                            when (val s = part.state) {
+                                is LegacyToolState.Completed -> s.output.takeIf { it.isNotBlank() }
+                                is LegacyToolState.Error -> s.error.takeIf { it.isNotBlank() }
+                                else -> null
+                            }?.let { truncateForDisplay(it) }
                         }
                         if (output != null) {
-                            val outputStr = remember(part.id) {
-                                if (output.length > 3000) output.take(3000) + "\n... (truncated)" else output
-                            }
                             Spacer(Modifier.height(4.dp))
                             Text(
-                                outputStr,
+                                output,
                                 style = MaterialTheme.typography.bodySmall,
                                 fontFamily = FontFamily.Monospace,
                                 color = MaterialTheme.colorScheme.onSurfaceVariant,
@@ -1676,6 +1332,9 @@ private fun ToolPart(part: LegacyPart, projectRoot: String, chatPainters: ChatPa
         }
     }
 }
+
+private fun truncateForDisplay(s: String, max: Int = 8000): String =
+    if (s.length <= max) s else s.take(max) + "\n… (${s.length - max} more characters)"
 
 private fun matchCount(part: LegacyPart): String? {
     if (part.tool !in setOf("glob", "grep")) return null
@@ -1714,12 +1373,7 @@ private fun toolLabel(part: LegacyPart, projectRoot: String): String {
     return when(part.tool) {
         "read","write","edit" -> obj["filePath"]?.toString()?.removeSurrounding("\"")?.let { relativePath(it, projectRoot) }?.ifEmpty{null} ?: (part.tool ?: "tool")
         "glob","grep" -> obj["pattern"]?.toString()?.removeSurrounding("\"").let{ if(it!=null&&it.length>40) it.take(40)+"..." else it} ?: (part.tool ?: "tool")
-        "bash" -> {
-            val raw = obj["command"]?.jsonPrimitive?.contentOrNull ?: obj["command"]?.toString()?.removeSurrounding("\"")
-            val firstLine = raw?.lines()?.firstOrNull { it.isNotBlank() }?.trim() ?: ""
-            val singleLine = if (firstLine.length > 50) firstLine.take(50) + "..." else firstLine
-            if (singleLine.isNotBlank()) "$ $singleLine" else "bash"
-        }
+        "bash" -> obj["command"]?.toString()?.removeSurrounding("\"").let{ if(it!=null) "$$it" else null} ?: "bash"
         "task" -> {
             val subType = obj["subagent_type"]?.toString()?.removeSurrounding("\"") ?: ""
             if (subType.isNotBlank()) "Launched $subType agent" else "Launched agent"

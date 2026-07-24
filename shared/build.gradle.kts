@@ -63,10 +63,7 @@ kotlin {
             implementation(libs.ktor.serialization.kotlinx.json)
             implementation(libs.multiplatform.settings.no.arg)
             implementation(libs.kotlinx.datetime)
-            implementation(libs.multiplatform.markdown.renderer)
-            implementation(libs.multiplatform.markdown.renderer.m3)
-            implementation(libs.commonmark)
-            implementation(libs.commonmark.ext.gfm.tables)
+            implementation(libs.intellij.markdown)
         }
         iosMain.dependencies {
             implementation(libs.ktor.client.darwin)

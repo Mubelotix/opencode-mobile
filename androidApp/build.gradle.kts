@@ -37,6 +37,8 @@ android {
     }
     buildTypes {
         release {
+            // Debug-signed so perf builds can be installed directly during development.
+            signingConfig = signingConfigs.getByName("debug")
             isMinifyEnabled = false
             proguardFiles(
                 getDefaultProguardFile("proguard-android-optimize.txt"),
