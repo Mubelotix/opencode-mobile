@@ -773,7 +773,7 @@ private fun SendingIndicator() {
     }
     val headerText = if (isStreaming) {
         val elapsed = startTime?.let { Clock.System.now().toEpochMilliseconds() - it } ?: 0
-        if (elapsed < 1000) "Thinking for ${elapsed}ms" else "Thinking for ${thinkingDurationText(elapsed)}s"
+        if (elapsed < 1000) "Thinking for ${elapsed}ms" else thinkingDurationText(elapsed)
     } else finalDurations[key] ?: "Thought"
     Column(Modifier.clickable { expanded = !expanded }) {
         Row(Modifier.fillMaxWidth().padding(vertical = 2.dp), verticalAlignment = Alignment.CenterVertically) {
