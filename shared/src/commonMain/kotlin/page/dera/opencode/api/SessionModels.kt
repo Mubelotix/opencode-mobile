@@ -22,11 +22,47 @@ data class SessionInfo(
     val projectID: String,
     val time: SessionTime,
     val location: SessionLocation,
+    val model: SessionModel? = null,
     val parentID: String? = null,
     val agent: String? = null,
     val slug: String? = null,
     val tokens: SessionTokens? = null,
     val cost: Double? = null,
+)
+
+@Serializable
+data class SessionModel(
+    val id: String,
+    @SerialName("providerID")
+    val providerID: String,
+)
+
+@Serializable
+data class ProviderListResponse(
+    val all: List<ProviderInfo> = emptyList(),
+    val connected: List<String> = emptyList(),
+    val default: Map<String, String> = emptyMap(),
+)
+
+@Serializable
+data class ProviderInfo(
+    val id: String,
+    val name: String,
+    val models: Map<String, ProviderModel> = emptyMap(),
+)
+
+@Serializable
+data class ProviderModel(
+    val id: String,
+    val name: String,
+    @SerialName("providerID")
+    val providerID: String,
+    val limit: ModelLimit,
+)
+
+@Serializable
+data class ModelLimit(
+    val context: Long,
 )
 
 @Serializable

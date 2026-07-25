@@ -61,6 +61,28 @@ class OpencodeApi(
         } catch (e: Exception) { Result.failure(e) }
     }
 
+    suspend fun getSession(sessionId: String, directory: String): Result<SessionInfo> {
+        return try {
+            val b = client.get("$serverUrl/api/session/$sessionId") {
+                authHeader()?.let { (k, v) -> header(k, v) }
+                url.parameters.append("directory", directory)
+            }.bodyAsText()
+            Result.success(json.decodeFromString<SessionCreateResponse>(b).data)
+        } catch (e: Exception) { Result.failure(e) }
+    }
+
+    suspend fun listProviders(directory: String): Result<List<ProviderInfo>> {
+        return try {
+            val b = client.get("$serverUrl/provider") {
+                authHeader()?.let { (k, v) -> header(k, v) }
+                url.parameters.append("directory", directory)
+            }.bodyAsText()
+            Result.success(json.decodeFromString<ProviderListResponse>(b).all)
+        } catch (e: Exception) {
+            Result.failure(e)
+        }
+    }
+
     suspend fun listFiles(directory: String, path: String = "."): Result<FsListResponse> {
         return try {
             val b = client.get("$serverUrl/api/fs/list") {

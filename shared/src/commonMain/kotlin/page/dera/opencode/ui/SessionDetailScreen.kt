@@ -92,6 +92,8 @@ import page.dera.opencode.api.QuestionInfo
 import page.dera.opencode.api.QuestionOption
 import page.dera.opencode.api.QuestionRequest
 import page.dera.opencode.api.QuestionToolRef
+import page.dera.opencode.api.ProviderInfo
+import page.dera.opencode.api.SessionModel
 import page.dera.opencode.api.SessionTokens
 import page.dera.opencode.api.TodoInfo
 import page.dera.opencode.ui.TerminalContent
@@ -284,6 +286,8 @@ fun SessionDetailScreen(api: OpencodeApi, sessionId: String, sessionTitle: Strin
     var errorText by remember { mutableStateOf<String?>(null) }
     var sessionTokens by remember { mutableStateOf<SessionTokens?>(null) }
     var sessionCost by remember { mutableStateOf<Double?>(null) }
+    var sessionModel by remember { mutableStateOf<SessionModel?>(null) }
+    var providers by remember { mutableStateOf<List<ProviderInfo>>(emptyList()) }
     var currentTitle by remember { mutableStateOf(sessionTitle) }
     var isEditingTitle by remember { mutableStateOf(false) }
     var editTitleText by remember { mutableStateOf(currentTitle) }
@@ -315,6 +319,16 @@ fun SessionDetailScreen(api: OpencodeApi, sessionId: String, sessionTitle: Strin
             }
         }.onFailure { errorText = it.message }
         isLoading = false
+    }
+
+    LaunchedEffect(sessionId, directory) {
+        api.getSession(sessionId, directory).onSuccess { info ->
+            sessionTokens = info.tokens
+            sessionCost = info.cost
+            sessionModel = info.model
+            currentTitle = info.title.ifEmpty { currentTitle }
+        }
+        api.listProviders(directory).onSuccess { providers = it }
     }
 
     LaunchedEffect(sessionId, directory) {
@@ -725,12 +739,13 @@ fun SessionDetailScreen(api: OpencodeApi, sessionId: String, sessionTitle: Strin
                 Box(Modifier.fillMaxSize()) {
                     TerminalContent(api, directory)
                 }
+            } else if (selectedTab == 4) {
+                InfoContent(sessionTokens, sessionCost, sessionModel, providers, messages)
             } else if (selectedTab != 0) {
                 Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
                     Text(
                     when (selectedTab) {
                         1 -> "Git Diff"
-                        4 -> "Info"
                         5 -> "Browser"
                         else -> ""
                     },
@@ -1454,6 +1469,242 @@ private fun formatCost(cost: Double): String {
     val dollars = cost.toLong()
     val cents = ((cost - dollars) * 100).toLong()
     return "$$dollars.${cents.toString().padStart(2, '0')}"
+}
+
+@Composable
+private fun InfoContent(
+    sessionTokens: SessionTokens?,
+    sessionCost: Double?,
+    sessionModel: SessionModel?,
+    providers: List<ProviderInfo>,
+    messages: List<LegacyWithParts>,
+) {
+    val tokens = sessionTokens
+    if (tokens == null && sessionCost == null) {
+        Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+            Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                Text(
+                    "Session info not available yet",
+                    style = MaterialTheme.typography.bodyLarge,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+                Spacer(Modifier.height(4.dp))
+                Text(
+                    "Run a prompt to see token usage and cost",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+        }
+        return
+    }
+
+    val userCount = messages.count { it.info.role == "user" }
+    val assistantCount = messages.count { it.info.role == "assistant" }
+    val systemCount = messages.count { it.info.role == "system" }
+
+    val input = tokens?.input ?: 0
+    val output = tokens?.output ?: 0
+    val reasoning = tokens?.reasoning ?: 0
+    val cacheRead = tokens?.cache?.read ?: 0
+    val cacheWrite = tokens?.cache?.write ?: 0
+    val total = input + output + reasoning + cacheRead + cacheWrite
+
+    val contextLimit = remember(sessionModel, providers) {
+        val model = sessionModel ?: messages.lastOrNull { it.info.role == "assistant" }?.info?.let {
+            SessionModel(id = it.modelID, providerID = it.providerID)
+        }
+        model?.let { m ->
+            providers.find { it.id == m.providerID }
+                ?.models?.get(m.id)
+                ?.limit?.context
+        }
+    }
+
+    val lastMsgTokens = messages.lastOrNull { it.info.role == "assistant" }?.info?.tokens
+    val msgTotal = lastMsgTokens?.total
+        ?: (lastMsgTokens?.input ?: 0) + (lastMsgTokens?.output ?: 0) + (lastMsgTokens?.reasoning ?: 0)
+    val msgInput = lastMsgTokens?.input ?: 0
+    val msgOutput = lastMsgTokens?.output ?: 0
+    val msgReasoning = lastMsgTokens?.reasoning ?: 0
+
+    Column(
+        Modifier
+            .fillMaxSize()
+            .verticalScroll(rememberScrollState())
+            .padding(horizontal = 16.dp, vertical = 12.dp),
+    ) {
+        Text(
+            "Context Usage",
+            style = MaterialTheme.typography.titleSmall,
+            color = MaterialTheme.colorScheme.onSurface,
+        )
+        Spacer(Modifier.height(12.dp))
+
+        TokenBreakdownBar(
+            input = msgInput,
+            output = msgOutput,
+            reasoning = msgReasoning,
+            contextLimit = contextLimit,
+            modifier = Modifier.fillMaxWidth(),
+        )
+        Spacer(Modifier.height(16.dp))
+
+        InfoStat(label = "Total tokens", value = formatTokenCount(total))
+        contextLimit?.let {
+            val usagePercent = if (it > 0 && msgTotal > 0) (msgTotal.toDouble() / it * 100).toInt() else 0
+            InfoStat(label = "Context limit", value = "${formatTokenCount(it)} (${usagePercent}% used)")
+        }
+        InfoStat(label = "Input tokens", value = formatTokenCount(input))
+        InfoStat(label = "Output tokens", value = formatTokenCount(output))
+        InfoStat(label = "Reasoning tokens", value = formatTokenCount(reasoning))
+        InfoStat(label = "Cache read", value = formatTokenCount(cacheRead))
+        InfoStat(label = "Cache write", value = formatTokenCount(cacheWrite))
+        InfoStat(label = "Cost", value = sessionCost?.let { formatCost(it) } ?: "—")
+        Spacer(Modifier.height(16.dp))
+
+        Text(
+            "Messages",
+            style = MaterialTheme.typography.titleSmall,
+            color = MaterialTheme.colorScheme.onSurface,
+        )
+        Spacer(Modifier.height(8.dp))
+
+        InfoStat(label = "Total messages", value = messages.size.toString())
+        InfoStat(label = "User messages", value = userCount.toString())
+        InfoStat(label = "Assistant messages", value = assistantCount.toString())
+        if (systemCount > 0) {
+            InfoStat(label = "System messages", value = systemCount.toString())
+        }
+
+        val firstMessage = messages.firstOrNull()
+        val lastMessage = messages.lastOrNull()
+        if (firstMessage != null || lastMessage != null) {
+            Spacer(Modifier.height(16.dp))
+            Text(
+                "Timeline",
+                style = MaterialTheme.typography.titleSmall,
+                color = MaterialTheme.colorScheme.onSurface,
+            )
+            Spacer(Modifier.height(8.dp))
+            firstMessage?.let {
+                InfoStat(label = "First message", value = formatTimestamp(it.info.time.created))
+            }
+            lastMessage?.let {
+                InfoStat(label = "Last message", value = formatTimestamp(it.info.time.created))
+            }
+        }
+    }
+}
+
+@Composable
+private fun TokenBreakdownBar(
+    input: Long,
+    output: Long,
+    reasoning: Long,
+    contextLimit: Long?,
+    modifier: Modifier = Modifier,
+) {
+    val used = input + output + reasoning
+    if (used <= 0 && contextLimit == null) return
+
+    Column(modifier) {
+        Row(
+            Modifier
+                .height(8.dp)
+                .fillMaxWidth()
+                .clip(RoundedCornerShape(4.dp)),
+        ) {
+            val free = contextLimit?.let { if (it > used) it - used else 0L } ?: 0
+            val visualTotal = if (contextLimit != null && contextLimit > 0) contextLimit else used
+            val segments = listOf(
+                TokenSegment("Input", input, Color(0xFF4A90D9)),
+                TokenSegment("Output", output, Color(0xFF4CAF50)),
+                TokenSegment("Reasoning", reasoning, Color(0xFF9C27B0)),
+                TokenSegment("Free", free, Color(0xFFE0E0E0)),
+            ).filter { it.tokens > 0 }
+
+            segments.forEach { segment ->
+                Box(
+                    Modifier
+                        .fillMaxHeight()
+                        .weight(segment.tokens.toFloat())
+                        .background(segment.color),
+                )
+            }
+        }
+        Spacer(Modifier.height(8.dp))
+        Row(
+            Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.SpaceBetween,
+        ) {
+            val segments = listOf(
+                Triple("Input", input, Color(0xFF4A90D9)),
+                Triple("Output", output, Color(0xFF4CAF50)),
+                Triple("Reasoning", reasoning, Color(0xFF9C27B0)),
+            ).filter { it.second > 0 }
+            if (contextLimit != null && contextLimit > used) {
+                (segments + Triple("Free", contextLimit - used, Color(0xFFBDBDBD)))
+            } else {
+                segments
+            }.forEach { (label, _, color) ->
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Box(
+                        Modifier
+                            .size(10.dp)
+                            .clip(CircleShape)
+                            .background(color),
+                    )
+                    Spacer(Modifier.width(4.dp))
+                    Text(
+                        label,
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+            }
+        }
+    }
+}
+
+private data class TokenSegment(val label: String, val tokens: Long, val color: Color)
+
+private fun formatTimestamp(epochMillis: Long): String {
+    if (epochMillis <= 0) return "—"
+    val elapsed = Clock.System.now().toEpochMilliseconds() - epochMillis
+    if (elapsed < 0) return "—"
+    val seconds = elapsed / 1000
+    val minutes = seconds / 60
+    val hours = minutes / 60
+    val days = hours / 24
+    return when {
+        days > 0 -> "${days}d ${hours % 24}h ago"
+        hours > 0 -> "${hours}h ${minutes % 60}m ago"
+        minutes > 0 -> "${minutes}m ${seconds % 60}s ago"
+        else -> "${seconds}s ago"
+    }
+}
+
+@Composable
+private fun InfoStat(label: String, value: String) {
+    Row(
+        Modifier
+            .fillMaxWidth()
+            .padding(vertical = 4.dp),
+        horizontalArrangement = Arrangement.SpaceBetween,
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Text(
+            label,
+            style = MaterialTheme.typography.bodyMedium,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+        Text(
+            value,
+            style = MaterialTheme.typography.bodyMedium,
+            color = MaterialTheme.colorScheme.onSurface,
+        )
+    }
 }
 
 @Composable
