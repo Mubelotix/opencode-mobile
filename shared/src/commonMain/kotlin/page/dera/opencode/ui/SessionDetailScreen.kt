@@ -744,11 +744,10 @@ fun SessionDetailScreen(api: OpencodeApi, sessionId: String, sessionTitle: Strin
                 }
             } else if (selectedTab == 5) {
                 InfoContent(sessionTokens, sessionCost, sessionModel, providers, messages)
-            } else if (selectedTab != 0 && selectedTab != 2) {
+            } else if (selectedTab != 0 && selectedTab != 1 && selectedTab != 2) {
                 Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
                     Text(
                     when (selectedTab) {
-                        1 -> "Git"
                         6 -> "Browser"
                         else -> ""
                     },
@@ -756,6 +755,12 @@ fun SessionDetailScreen(api: OpencodeApi, sessionId: String, sessionTitle: Strin
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
                 }
+            }
+            Box(
+                Modifier.fillMaxSize()
+                    .then(if (selectedTab == 1) Modifier else Modifier.alpha(0f))
+            ) {
+                GitReviewContent(api, directory)
             }
             Box(
                 Modifier.fillMaxSize()
