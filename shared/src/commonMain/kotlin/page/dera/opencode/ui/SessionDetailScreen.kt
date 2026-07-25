@@ -95,6 +95,7 @@ import page.dera.opencode.api.QuestionRequest
 import page.dera.opencode.api.QuestionToolRef
 import page.dera.opencode.api.SessionTokens
 import page.dera.opencode.api.TodoInfo
+import page.dera.opencode.ui.TerminalContent
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.JsonObject
@@ -719,12 +720,15 @@ fun SessionDetailScreen(api: OpencodeApi, sessionId: String, sessionTitle: Strin
             }
             if (selectedTab == 2) {
                 TodoContent(todos)
+            } else if (selectedTab == 3) {
+                Box(Modifier.fillMaxSize().imePadding()) {
+                    TerminalContent(api, directory)
+                }
             } else if (selectedTab != 0) {
                 Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
                     Text(
                     when (selectedTab) {
                         1 -> "Git Diff"
-                        3 -> "Terminal"
                         4 -> "Info"
                         5 -> "Browser"
                         else -> ""

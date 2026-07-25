@@ -1,11 +1,13 @@
 package page.dera.opencode.api
 
 import io.ktor.client.HttpClient
+import io.ktor.client.request.delete
 import io.ktor.client.request.get
 import io.ktor.client.request.header
 import io.ktor.client.request.patch
 import io.ktor.client.request.post
 import io.ktor.client.request.prepareGet
+import io.ktor.client.request.put
 import io.ktor.client.request.setBody
 import io.ktor.client.statement.bodyAsChannel
 import io.ktor.client.statement.bodyAsText
@@ -166,6 +168,68 @@ class OpencodeApi(
             val list = json.decodeFromString<List<TodoInfo>>(b)
             Result.success(list)
         } catch (e: Exception) { Result.failure(e) }
+    }
+
+    suspend fun listPtys(directory: String): Result<PtyListResponse> {
+        return try {
+            val b = client.get("$serverUrl/api/pty") {
+                authHeader()?.let { (k, v) -> header(k, v) }
+                url.parameters.append("directory", directory)
+            }.bodyAsText()
+            val wrapper = json.decodeFromString<PtyListResponse>(b)
+            Result.success(wrapper)
+        } catch (e: Exception) { Result.failure(e) }
+    }
+
+    suspend fun createPty(directory: String, payload: PtyCreatePayload): Result<PtyInfo> {
+        return try {
+            val b = client.post("$serverUrl/api/pty") {
+                authHeader()?.let { (k, v) -> header(k, v) }
+                contentType(ContentType.Application.Json)
+                url.parameters.append("directory", directory)
+                setBody(json.encodeToString(PtyCreatePayload.serializer(), payload))
+            }.bodyAsText()
+            println("OC_DBG: createPty response body=$b")
+            val wrapper = json.decodeFromString<PtyCreateResponse>(b)
+            Result.success(wrapper.data)
+        } catch (e: Exception) { Result.failure(e) }
+    }
+
+    suspend fun removePty(ptyID: String, directory: String): Result<Unit> {
+        return try {
+            client.delete("$serverUrl/api/pty/$ptyID") {
+                authHeader()?.let { (k, v) -> header(k, v) }
+                url.parameters.append("directory", directory)
+            }
+            Result.success(Unit)
+        } catch (e: Exception) { Result.failure(e) }
+    }
+
+    suspend fun connectPtyToken(ptyID: String, directory: String): Result<PtyConnectToken> {
+        return try {
+            val b = client.post("$serverUrl/api/pty/$ptyID/connect-token") {
+                authHeader()?.let { (k, v) -> header(k, v) }
+                url.parameters.append("directory", directory)
+                header("x-opencode-ticket", "1")
+            }.bodyAsText()
+            val wrapper = json.decodeFromString<PtyTokenResponse>(b)
+            Result.success(wrapper.data)
+        } catch (e: Exception) { Result.failure(e) }
+    }
+
+    fun buildPtyWebSocketUrl(ptyID: String, directory: String, cursor: Int = 0, ticket: String? = null): String {
+        val httpUrl = serverUrl.replace("http://", "ws://").replace("https://", "wss://")
+        val sb = StringBuilder("$httpUrl/api/pty/$ptyID/connect")
+        val params = mutableListOf<String>()
+        params.add("directory=$directory")
+        params.add("cursor=$cursor")
+        if (ticket != null) params.add("ticket=$ticket")
+        if (!password.isNullOrBlank()) {
+            val token = Base64.Default.encode("opencode:$password".encodeToByteArray())
+            params.add("auth_token=$token")
+        }
+        sb.append("?").append(params.joinToString("&"))
+        return sb.toString()
     }
 
     fun streamGlobalEvents(directory: String): Flow<GlobalEvent> = flow {
