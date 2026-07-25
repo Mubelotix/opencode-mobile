@@ -294,6 +294,7 @@ fun SessionDetailScreen(api: OpencodeApi, sessionId: String, sessionTitle: Strin
     var editTitleText by remember { mutableStateOf(currentTitle) }
     var titleWasFocused by remember { mutableStateOf(false) }
     val titleFocusRequester = remember { FocusRequester() }
+    var fileChangeTick by remember { mutableStateOf(0) }
 
     LaunchedEffect(isEditingTitle) {
         if (isEditingTitle) {
@@ -424,6 +425,7 @@ fun SessionDetailScreen(api: OpencodeApi, sessionId: String, sessionTitle: Strin
                         "session.idle" -> {
                             println("OC_DBG: session.idle $sid, msgs before=${messages.size}")
                             isRunning = false
+                            fileChangeTick++
                             api.getSessionMessages(sessionId).onSuccess { fresh ->
                                 Perf.timed("session.idle refresh msgs=${fresh.size}") {
                                     messages.removeAll { !it.info.id.startsWith("evt_") }
@@ -758,7 +760,7 @@ fun SessionDetailScreen(api: OpencodeApi, sessionId: String, sessionTitle: Strin
                 Modifier.fillMaxSize()
                     .then(if (selectedTab == 1) Modifier else Modifier.alpha(0f))
             ) {
-                GitDiffContent(api, directory)
+                GitDiffContent(api, directory, fileChangeTick)
             }
         }
     }

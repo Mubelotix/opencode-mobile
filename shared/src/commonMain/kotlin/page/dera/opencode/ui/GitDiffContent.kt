@@ -191,7 +191,7 @@ private fun buildDisplayLines(fileContent: String, patch: String): List<DisplayL
 }
 
 @Composable
-fun GitDiffContent(api: OpencodeApi, directory: String) {
+fun GitDiffContent(api: OpencodeApi, directory: String, fileChangeTick: Int = 0) {
     val scope = rememberCoroutineScope()
     val engine = remember { SyntaxTokenizer() }
     val isDark = MaterialTheme.colorScheme.background.luminance() < 0.5f
@@ -224,6 +224,16 @@ fun GitDiffContent(api: OpencodeApi, directory: String) {
             onFailure = { e -> if (errorText == null) errorText = e.message ?: "Failed to load files" },
         )
         isLoading = false
+    }
+
+    LaunchedEffect(fileChangeTick) {
+        if (fileChangeTick > 0) {
+            reviewedFiles.clear()
+            api.getVcsDiff(directory).fold(
+                onSuccess = { diffs -> diffMap = diffs.associateBy { it.file }; hasChanges = diffs.isNotEmpty() },
+                onFailure = { },
+            )
+        }
     }
 
     fun toggleDir(dirPath: String) {
