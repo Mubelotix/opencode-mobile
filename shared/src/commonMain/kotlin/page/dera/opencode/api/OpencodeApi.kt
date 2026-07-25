@@ -205,11 +205,13 @@ class OpencodeApi(
 
     suspend fun createPty(directory: String, payload: PtyCreatePayload): Result<PtyInfo> {
         return try {
+            val body = json.encodeToString(PtyCreatePayload.serializer(), payload)
+            println("OC_DBG: createPty directory=$directory body=$body")
             val b = client.post("$serverUrl/api/pty") {
                 authHeader()?.let { (k, v) -> header(k, v) }
                 contentType(ContentType.Application.Json)
                 url.parameters.append("directory", directory)
-                setBody(json.encodeToString(PtyCreatePayload.serializer(), payload))
+                setBody(body)
             }.bodyAsText()
             println("OC_DBG: createPty response body=$b")
             val wrapper = json.decodeFromString<PtyCreateResponse>(b)

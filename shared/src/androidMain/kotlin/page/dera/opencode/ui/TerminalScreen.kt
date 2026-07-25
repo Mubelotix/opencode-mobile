@@ -55,7 +55,6 @@ actual fun TerminalContent(api: OpencodeApi, directory: String) {
     var ptyId by remember { mutableStateOf<String?>(null) }
     var commandChannel by remember { mutableStateOf<Channel<String>?>(null) }
     var ptyJob by remember { mutableStateOf<kotlinx.coroutines.Job?>(null) }
-    var ptyDir by remember { mutableStateOf(directory) }
 
     val channelRef = remember { mutableStateOf<Channel<String>?>(null) }
 
@@ -77,12 +76,11 @@ actual fun TerminalContent(api: OpencodeApi, directory: String) {
         val result = api.listPtys(directory)
         if (result.isSuccess) {
             val resp = result.getOrThrow()
-            resp.location?.directory?.let { ptyDir = it }
-            val existing = resp.data.firstOrNull { it.status == "running" }
+            val existing = resp.data.firstOrNull { it.status == "running" && it.cwd == directory }
             if (existing != null) {
                 ptyId = existing.id
             } else {
-                val create = api.createPty(ptyDir, PtyCreatePayload(title = "Terminal"))
+                val create = api.createPty(directory, PtyCreatePayload(title = "Terminal", cwd = directory))
                 if (create.isSuccess) ptyId = create.getOrThrow().id
             }
         }
@@ -90,7 +88,7 @@ actual fun TerminalContent(api: OpencodeApi, directory: String) {
 
     DisposableEffect(ptyId) {
         val id = ptyId
-        val dir = ptyDir
+        val dir = directory
         if (id != null) {
             val ch = Channel<String>(Channel.UNLIMITED)
             channelRef.value = ch
