@@ -49,6 +49,7 @@ import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -88,6 +89,7 @@ import page.dera.opencode.api.LegacyToolState
 import page.dera.opencode.api.LegacyWithParts
 import page.dera.opencode.api.OpencodeApi
 import page.dera.opencode.api.PermissionRequest
+import page.dera.opencode.api.ReviewComment
 import page.dera.opencode.api.PermissionToolRef
 import page.dera.opencode.api.QuestionInfo
 import page.dera.opencode.api.QuestionOption
@@ -105,6 +107,10 @@ import kotlinx.serialization.json.contentOrNull
 import kotlinx.serialization.json.jsonArray
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
+import com.russhwolf.settings.Settings
+import com.russhwolf.settings.get
+import com.russhwolf.settings.set
+import kotlinx.serialization.builtins.ListSerializer
 import opencodeapp.shared.generated.resources.globeIcon
 import opencodeapp.shared.generated.resources.folderIcon
 import opencodeapp.shared.generated.resources.searchIcon
@@ -296,6 +302,16 @@ fun SessionDetailScreen(api: OpencodeApi, sessionId: String, sessionTitle: Strin
     var titleWasFocused by remember { mutableStateOf(false) }
     val titleFocusRequester = remember { FocusRequester() }
     var fileChangeTick by remember { mutableStateOf(0) }
+    val reviewComments = remember {
+        val saved = try { Settings().getStringOrNull("review_$sessionId") } catch (_: Exception) { null }
+        val list = mutableStateListOf<ReviewComment>()
+        if (saved != null) try { list.addAll(Json { ignoreUnknownKeys = true }.decodeFromString<List<ReviewComment>>(saved)) } catch (_: Exception) { }
+        list
+    }
+    LaunchedEffect(reviewComments.toList()) {
+        val json = Json { prettyPrint = false }
+        Settings().putString("review_$sessionId", json.encodeToString(kotlinx.serialization.builtins.ListSerializer(ReviewComment.serializer()), reviewComments.toList()))
+    }
 
     LaunchedEffect(isEditingTitle) {
         if (isEditingTitle) {
@@ -719,6 +735,27 @@ fun SessionDetailScreen(api: OpencodeApi, sessionId: String, sessionTitle: Strin
                         }
                     }
                 }
+                if (reviewComments.isNotEmpty()) {
+                    Row(
+                        Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 4.dp),
+                        horizontalArrangement = Arrangement.End,
+                    ) {
+                        TextButton(onClick = {
+                            val md = "Here is a review of the code:\n\n" + reviewComments.joinToString("\n\n") { c ->
+                                "**${c.filePath}:${c.lineStart}** - ${c.text}"
+                            }
+                            reviewComments.clear()
+                            isSending = true
+                            scope.launch {
+                                if (api.sendPrompt(sessionId, md).isSuccess) { println("OC_DBG: review sent") }
+                                else { errorText = "Failed to send review" }
+                                isSending = false
+                            }
+                        }) {
+                            Text("Send ${reviewComments.size} comment${if (reviewComments.size > 1) "s" else ""}")
+                        }
+                    }
+                }
                 Row(Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 8.dp), verticalAlignment = Alignment.Bottom) {
                     OutlinedTextField(
                         value = inputText, onValueChange = { inputText = it }, modifier = Modifier.weight(1f),
@@ -763,7 +800,7 @@ fun SessionDetailScreen(api: OpencodeApi, sessionId: String, sessionTitle: Strin
                     .zIndex(if (selectedTab == 1) 1f else 0f)
                     .then(if (selectedTab == 1) Modifier else Modifier.alpha(0f))
             ) {
-                GitDiffContent(api, directory, fileChangeTick)
+                GitDiffContent(api, directory, fileChangeTick, reviewComments)
             }
         }
     }

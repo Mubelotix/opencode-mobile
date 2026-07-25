@@ -4,8 +4,10 @@ import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.slideInHorizontally
 import androidx.compose.animation.slideOutHorizontally
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.horizontalScroll
+import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
@@ -17,12 +19,14 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
@@ -54,6 +58,7 @@ import kotlinx.coroutines.launch
 import page.dera.opencode.api.FileDiff
 import page.dera.opencode.api.FsEntry
 import page.dera.opencode.api.OpencodeApi
+import page.dera.opencode.api.ReviewComment
 
 private val AddBg = Color(0xFFE6FFEC)
 private val DelBg = Color(0xFFFFEBE9)
@@ -191,7 +196,7 @@ private fun buildDisplayLines(fileContent: String, patch: String): List<DisplayL
 }
 
 @Composable
-fun GitDiffContent(api: OpencodeApi, directory: String, fileChangeTick: Int = 0) {
+fun GitDiffContent(api: OpencodeApi, directory: String, fileChangeTick: Int = 0, reviewComments: MutableList<ReviewComment> = mutableListOf()) {
     val scope = rememberCoroutineScope()
     val engine = remember { SyntaxTokenizer() }
     val isDark = MaterialTheme.colorScheme.background.luminance() < 0.5f
@@ -203,6 +208,8 @@ fun GitDiffContent(api: OpencodeApi, directory: String, fileChangeTick: Int = 0)
     var isLoading by remember { mutableStateOf(true) }
     var hasChanges by remember { mutableStateOf(false) }
     var drawerOpen by remember { mutableStateOf(false) }
+    var commentTarget by remember { mutableStateOf<Pair<String, Int>?>(null) }
+    var commentText by remember { mutableStateOf("") }
 
     val dirCache = remember { mutableStateMapOf<String, List<FsEntry>>() }
     val expandedDirs = remember { mutableStateListOf<String>() }
@@ -314,7 +321,17 @@ fun GitDiffContent(api: OpencodeApi, directory: String, fileChangeTick: Int = 0)
                 }
             }
             Box(Modifier.weight(1f).fillMaxWidth()) {
-                if (view != null) FileView(view, engine, theme)
+                if (view != null) FileView(view, engine, theme, reviewComments, commentTarget, commentText,
+                    onTapLine = { path, line ->
+                        commentTarget = path to line
+                        commentText = reviewComments.find { it.filePath == path && it.lineStart == line }?.text ?: ""
+                    },
+                    onRemoveComment = { id -> reviewComments.removeAll { it.id == id } },
+                    onUpdateComment = { id, text ->
+                        val idx = reviewComments.indexOfFirst { it.id == id }
+                        if (idx >= 0) reviewComments[idx] = reviewComments[idx].copy(text = text)
+                    },
+                )
                 else if (!hasChanges) Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) { Text("No changes", style = MaterialTheme.typography.bodyLarge, color = MaterialTheme.colorScheme.onSurfaceVariant) }
                 else if (unreviewedFiles.isNotEmpty()) Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
                     Column(horizontalAlignment = Alignment.CenterHorizontally) {
@@ -324,7 +341,7 @@ fun GitDiffContent(api: OpencodeApi, directory: String, fileChangeTick: Int = 0)
                 }
                 else Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) { Text("Tap Files to browse", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant) }
             }
-            if (unreviewedFiles.isNotEmpty() && view != null) {
+            if ((unreviewedFiles.isNotEmpty() || reviewComments.isNotEmpty()) && view != null) {
                 val isCurrentReviewed = view.path in reviewedFiles
                 Row(
                     Modifier.fillMaxWidth().background(MaterialTheme.colorScheme.surface).padding(horizontal = 12.dp, vertical = 6.dp),
@@ -337,6 +354,10 @@ fun GitDiffContent(api: OpencodeApi, directory: String, fileChangeTick: Int = 0)
                         modifier = Modifier.clickable { toggleReviewed(view.path) }.padding(end = 8.dp),
                     )
                     Text("${unreviewedFiles.size} remaining", style = MaterialTheme.typography.labelSmall, color = ModFg, modifier = Modifier.weight(1f))
+                    if (reviewComments.isNotEmpty()) {
+                        Text("${reviewComments.size}\uD83D\uDCAC", style = MaterialTheme.typography.labelSmall, color = AddFg)
+                        Spacer(Modifier.width(8.dp))
+                    }
                     Text("\u25C0  Prev", style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.clickable { navigateReview(-1) }.padding(horizontal = 8.dp, vertical = 4.dp))
                     Text("Next  \u25B6", style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.primary, modifier = Modifier.clickable { navigateReview(1) }.padding(horizontal = 8.dp, vertical = 4.dp))
                 }
@@ -347,6 +368,44 @@ fun GitDiffContent(api: OpencodeApi, directory: String, fileChangeTick: Int = 0)
                 Box(Modifier.fillMaxSize().background(Color.Black.copy(alpha = 0.3f)).clickable { drawerOpen = false })
                 Box(Modifier.fillMaxHeight().width(260.dp).shadow(4.dp).background(MaterialTheme.colorScheme.surface)) {
                     FileTreeContent(visibleEntries, isDark, drawerOpen, ::toggleDir, ::openFile, view?.path, reviewedFiles, diffMap)
+                }
+            }
+        }
+        if (commentTarget != null) {
+            val (path, line) = commentTarget!!
+            Box(
+                Modifier.fillMaxWidth().align(Alignment.BottomCenter)
+                    .border(1.dp, MaterialTheme.colorScheme.outline, RoundedCornerShape(topStart = 8.dp, topEnd = 8.dp))
+                    .background(MaterialTheme.colorScheme.surface, RoundedCornerShape(topStart = 8.dp, topEnd = 8.dp))
+                    .padding(12.dp)
+            ) {
+                Column(Modifier.fillMaxWidth()) {
+                    Text("Comment on $path:$line", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    Spacer(Modifier.height(6.dp))
+                    OutlinedTextField(
+                        value = commentText, onValueChange = { commentText = it },
+                        modifier = Modifier.fillMaxWidth(),
+                        placeholder = { Text("Write a review comment") },
+                        singleLine = true,
+                    )
+                    Spacer(Modifier.height(4.dp))
+                    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
+                        TextButton(onClick = { commentTarget = null; commentText = "" }) { Text("Cancel") }
+                        TextButton(onClick = {
+                            if (commentText.isNotBlank()) {
+                                val existing = reviewComments.find { it.filePath == path && it.lineStart == line }
+                                if (existing != null) {
+                                    val idx = reviewComments.indexOf(existing)
+                                    if (idx >= 0) reviewComments[idx] = existing.copy(text = commentText.trim())
+                                } else {
+                                    val id = "${path}:$line:${reviewComments.size}"
+                                    reviewComments.add(ReviewComment(id, path, line, line, commentText.trim()))
+                                }
+                                commentTarget = null
+                                commentText = ""
+                            }
+                        }) { Text("Save") }
+                    }
                 }
             }
         }
@@ -428,29 +487,78 @@ private fun buildVisibleEntries(
 }
 
 @Composable
-private fun FileView(view: FileViewState, engine: SyntaxTokenizer, theme: SyntaxTheme) {
+private fun FileView(
+    view: FileViewState, engine: SyntaxTokenizer, theme: SyntaxTheme,
+    reviewComments: List<ReviewComment>, commentTarget: Pair<String, Int>?,
+    commentText: String,
+    onTapLine: (String, Int) -> Unit, onRemoveComment: (String) -> Unit,
+    onUpdateComment: (String, String) -> Unit,
+) {
+    val fileComments = reviewComments.filter { it.filePath == view.path }
     if (view.displayLines == null) {
-        PlainFileViewer(view.path, view.content, engine, theme)
+        PlainFileViewer(view.path, view.content, engine, theme, fileComments, onTapLine, onRemoveComment, onUpdateComment)
     } else {
-        DiffFileViewer(view.path, view.displayLines, engine, theme)
+        DiffFileViewer(view.path, view.displayLines, engine, theme, fileComments, onTapLine, onRemoveComment, onUpdateComment)
     }
 }
 
 @Composable
-private fun PlainFileViewer(filePath: String, content: String, engine: SyntaxTokenizer, theme: SyntaxTheme) {
+private fun PlainFileViewer(
+    filePath: String, content: String, engine: SyntaxTokenizer, theme: SyntaxTheme,
+    comments: List<ReviewComment>,
+    onTapLine: (String, Int) -> Unit, onRemoveComment: (String) -> Unit,
+    onUpdateComment: (String, String) -> Unit,
+) {
     val language = remember(filePath) { languageFromPath(filePath) }
     val highlighted = rememberSyntaxAnnotatedString(code = content, languageLabel = language, engine = engine, theme = theme)
     val highlightedLines = remember(highlighted, content) { splitAnnotatedString(highlighted) }
     val pad = maxOf(highlightedLines.size.toString().length, 3)
+    val commentedLines = remember(comments) { comments.associateBy { it.lineStart } }
+    var editingId by remember { mutableStateOf<String?>(null) }
 
-    Column(Modifier.fillMaxSize()) {
-        val scrollState = rememberScrollState()
-        Box(Modifier.fillMaxSize().horizontalScroll(scrollState)) {
-            LazyColumn(Modifier.fillMaxSize().padding(bottom = 8.dp), contentPadding = PaddingValues(vertical = 4.dp)) {
-                items(highlightedLines.size, key = { it }) { idx ->
-                    Row(Modifier.fillMaxWidth()) {
-                        Text("${idx + 1}".padStart(pad), style = mono12.copy(color = ContextFg), modifier = Modifier.padding(start = 4.dp, end = 8.dp))
+    LazyColumn(Modifier.fillMaxSize().padding(bottom = 8.dp), contentPadding = PaddingValues(vertical = 4.dp)) {
+        items(highlightedLines.size, key = { it }) { idx ->
+            val ln = idx + 1
+            val hasComment = commentedLines.containsKey(ln)
+            Column {
+                Box(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState())) {
+                    Row(Modifier.background(if (hasComment) AddBg.copy(alpha = 0.2f) else Color.Transparent)) {
+                        Text("$ln".padStart(pad), style = mono12.copy(color = if (hasComment) AddFg else ContextFg), modifier = Modifier.padding(start = 4.dp, end = 8.dp).clickable { onTapLine(filePath, ln) })
                         Text(highlightedLines.getOrElse(idx) { AnnotatedString("") }, style = mono12)
+                    }
+                }
+                if (hasComment) {
+                    val c = commentedLines[ln]!!
+                    val isEditing = editingId == c.id
+                    Box(
+                        Modifier.fillMaxWidth().padding(start = 12.dp, end = 12.dp, bottom = 6.dp, top = 2.dp)
+                            .border(1.dp, MaterialTheme.colorScheme.outline, RoundedCornerShape(6.dp))
+                            .background(MaterialTheme.colorScheme.surfaceVariant, RoundedCornerShape(6.dp))
+                            .padding(horizontal = 10.dp, vertical = 6.dp)
+                    ) {
+                        if (isEditing) {
+                            val editText = remember(c.id) { mutableStateOf(c.text) }
+                            Column {
+                                OutlinedTextField(
+                                    value = editText.value, onValueChange = { editText.value = it },
+                                    modifier = Modifier.fillMaxWidth(),
+                                    singleLine = false,
+                                )
+                                Spacer(Modifier.height(4.dp))
+                                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
+                                    Text("Cancel", modifier = Modifier.clickable { editingId = null }.padding(horizontal = 8.dp, vertical = 4.dp), style = mono12.copy(fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant))
+                                    Text("Save", modifier = Modifier.clickable {
+                                        onUpdateComment(c.id, editText.value.trim())
+                                        editingId = null
+                                    }.padding(horizontal = 8.dp, vertical = 4.dp), style = mono12.copy(fontSize = 12.sp, color = MaterialTheme.colorScheme.primary))
+                                }
+                            }
+                        } else {
+                            Row(verticalAlignment = Alignment.Top) {
+                                Text(c.text, style = MaterialTheme.typography.bodySmall.copy(fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant), modifier = Modifier.weight(1f).clickable { editingId = c.id })
+                                Text("\u2715", modifier = Modifier.clickable { onRemoveComment(c.id) }.padding(start = 8.dp, top = 1.dp), style = mono12.copy(fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant))
+                            }
+                        }
                     }
                 }
             }
@@ -459,31 +567,74 @@ private fun PlainFileViewer(filePath: String, content: String, engine: SyntaxTok
 }
 
 @Composable
-private fun DiffFileViewer(filePath: String, lines: List<DisplayLine>, engine: SyntaxTokenizer, theme: SyntaxTheme) {
+private fun DiffFileViewer(
+    filePath: String, lines: List<DisplayLine>, engine: SyntaxTokenizer, theme: SyntaxTheme,
+    comments: List<ReviewComment>,
+    onTapLine: (String, Int) -> Unit, onRemoveComment: (String) -> Unit,
+    onUpdateComment: (String, String) -> Unit,
+) {
     val language = remember(filePath) { languageFromPath(filePath) }
     val pad = maxOf(lines.maxOfOrNull { it.lineNumber ?: 0 }.toString().length, 3)
+    val commentedLines = remember(comments) { comments.associateBy { it.lineStart } }
+    var editingId by remember { mutableStateOf<String?>(null) }
 
-    Column(Modifier.fillMaxSize()) {
-        val scrollState = rememberScrollState()
-        Box(Modifier.fillMaxSize().horizontalScroll(scrollState)) {
-            LazyColumn(Modifier.fillMaxSize().padding(bottom = 8.dp), contentPadding = PaddingValues(vertical = 4.dp)) {
-                items(lines.size, key = { it }) { idx ->
-                    val line = lines[idx]
-                    val highlighted = rememberSyntaxAnnotatedString(code = line.content, languageLabel = language, engine = engine, theme = theme)
-                    val (fg, bg) = when (line.type) {
-                        DisplayLineType.ADDITION -> AddFg to AddBg
-                        DisplayLineType.DELETION -> DelFg to DelBg
-                        DisplayLineType.NORMAL -> Color.Transparent to Color.Transparent
-                    }
-                    Row(Modifier.fillMaxWidth().background(bg)) {
+    LazyColumn(Modifier.fillMaxSize().padding(bottom = 8.dp), contentPadding = PaddingValues(vertical = 4.dp)) {
+        items(lines.size, key = { it }) { idx ->
+            val line = lines[idx]
+            val highlighted = rememberSyntaxAnnotatedString(code = line.content, languageLabel = language, engine = engine, theme = theme)
+            val (fg, bg) = when (line.type) {
+                DisplayLineType.ADDITION -> AddFg to AddBg
+                DisplayLineType.DELETION -> DelFg to DelBg
+                DisplayLineType.NORMAL -> Color.Transparent to Color.Transparent
+            }
+            val ln = line.lineNumber
+            val hasComment = ln != null && commentedLines.containsKey(ln)
+            val lineBg = if (hasComment) AddBg.copy(alpha = 0.3f) else if (bg != Color.Transparent) bg else Color.Transparent
+            Column {
+                Box(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState())) {
+                    Row(Modifier.background(lineBg)) {
                         Box(Modifier.width(4.dp).fillMaxHeight().background(if (line.type == DisplayLineType.ADDITION) AddFg else if (line.type == DisplayLineType.DELETION) DelFg else Color.Transparent))
-                        val numText = if (line.lineNumber != null) "${line.lineNumber}".padStart(pad) else "-".repeat(pad)
-                        Text(numText, style = mono12.copy(color = ContextFg), modifier = Modifier.padding(start = 4.dp, end = 8.dp))
+                        val numText = if (ln != null) "$ln".padStart(pad) else "-".repeat(pad)
+                        Text(numText, style = mono12.copy(color = if (hasComment) AddFg else ContextFg), modifier = Modifier.padding(start = 4.dp, end = 8.dp).clickable { if (ln != null) onTapLine(filePath, ln) })
                         val prefix = when (line.type) { DisplayLineType.ADDITION -> "+"; DisplayLineType.DELETION -> "-"; else -> " " }
                         Text(prefix, style = mono12.copy(color = if (line.type != DisplayLineType.NORMAL) fg else ContextFg, fontWeight = if (line.type != DisplayLineType.NORMAL) FontWeight.Bold else FontWeight.Normal))
-                        Text(highlighted, style = mono12.copy(background = bg))
+                        Text(highlighted, style = mono12)
                     }
                 }
+                    if (hasComment) {
+                        val c = commentedLines[ln]!!
+                        val isEditing = editingId == c.id
+                        Box(
+                            Modifier.fillMaxWidth().padding(start = 12.dp, end = 12.dp, bottom = 6.dp, top = 2.dp)
+                                .border(1.dp, MaterialTheme.colorScheme.outline, RoundedCornerShape(6.dp))
+                                .background(MaterialTheme.colorScheme.surfaceVariant, RoundedCornerShape(6.dp))
+                                .padding(horizontal = 10.dp, vertical = 6.dp)
+                        ) {
+                            if (isEditing) {
+                                val editText = remember(c.id) { mutableStateOf(c.text) }
+                                Column {
+                                    OutlinedTextField(
+                                        value = editText.value, onValueChange = { editText.value = it },
+                                        modifier = Modifier.fillMaxWidth(),
+                                        singleLine = false,
+                                    )
+                                    Spacer(Modifier.height(4.dp))
+                                    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
+                                        Text("Cancel", modifier = Modifier.clickable { editingId = null }.padding(horizontal = 8.dp, vertical = 4.dp), style = mono12.copy(fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant))
+                                        Text("Save", modifier = Modifier.clickable {
+                                            onUpdateComment(c.id, editText.value.trim())
+                                            editingId = null
+                                        }.padding(horizontal = 8.dp, vertical = 4.dp), style = mono12.copy(fontSize = 12.sp, color = MaterialTheme.colorScheme.primary))
+                                    }
+                                }
+                            } else {
+                                Row(verticalAlignment = Alignment.Top) {
+                                    Text(c.text, style = MaterialTheme.typography.bodySmall.copy(fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant), modifier = Modifier.weight(1f).clickable { editingId = c.id })
+                                    Text("\u2715", modifier = Modifier.clickable { onRemoveComment(c.id) }.padding(start = 8.dp, top = 1.dp), style = mono12.copy(fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant))
+                                }
+                            }
+                        }
+                    }
             }
         }
     }

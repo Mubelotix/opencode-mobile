@@ -3,6 +3,7 @@
 ## Commit conventions
 - Capitalized verb, imperative mood, no scope prefix
 - Examples: `Add feature X`, `Fix crash on login`, `Update dependencies`
+- **NEVER EVER commit without the user explicitly asking you to. No exceptions.**
 
 ## Build
 ```bash
