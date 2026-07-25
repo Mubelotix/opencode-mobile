@@ -1542,8 +1542,9 @@ private fun InfoContent(
         )
         Spacer(Modifier.height(12.dp))
 
+        val contextInput = if (msgTotal > 0) msgTotal - msgOutput - msgReasoning else msgInput
         TokenBreakdownBar(
-            input = msgInput,
+            input = contextInput,
             output = msgOutput,
             reasoning = msgReasoning,
             contextLimit = contextLimit,
@@ -1609,6 +1610,9 @@ private fun TokenBreakdownBar(
     val used = input + output + reasoning
     if (used <= 0 && contextLimit == null) return
 
+    val free = contextLimit?.let { if (it > used) it - used else 0L } ?: 0
+    val totalWidth = if (contextLimit != null && contextLimit > 0) contextLimit else used
+
     Column(modifier) {
         Row(
             Modifier
@@ -1616,49 +1620,51 @@ private fun TokenBreakdownBar(
                 .fillMaxWidth()
                 .clip(RoundedCornerShape(4.dp)),
         ) {
-            val free = contextLimit?.let { if (it > used) it - used else 0L } ?: 0
-            val visualTotal = if (contextLimit != null && contextLimit > 0) contextLimit else used
-            val segments = listOf(
-                TokenSegment("Input", input, Color(0xFF4A90D9)),
-                TokenSegment("Output", output, Color(0xFF4CAF50)),
-                TokenSegment("Reasoning", reasoning, Color(0xFF9C27B0)),
-                TokenSegment("Free", free, Color(0xFFE0E0E0)),
-            ).filter { it.tokens > 0 }
-
-            segments.forEach { segment ->
+            if (used > 0) {
                 Box(
                     Modifier
                         .fillMaxHeight()
-                        .weight(segment.tokens.toFloat())
-                        .background(segment.color),
+                        .weight(used.toFloat())
+                        .background(Color(0xFF4A90D9)),
                 )
             }
+            Box(
+                Modifier
+                    .fillMaxHeight()
+                    .weight(if (free > 0) free.toFloat() else 1f)
+                    .background(Color(0xFFE0E0E0)),
+            )
         }
         Spacer(Modifier.height(8.dp))
         Row(
             Modifier.fillMaxWidth(),
             horizontalArrangement = Arrangement.SpaceBetween,
         ) {
-            val segments = listOf(
-                Triple("Input", input, Color(0xFF4A90D9)),
-                Triple("Output", output, Color(0xFF4CAF50)),
-                Triple("Reasoning", reasoning, Color(0xFF9C27B0)),
-            ).filter { it.second > 0 }
-            if (contextLimit != null && contextLimit > used) {
-                (segments + Triple("Free", contextLimit - used, Color(0xFFBDBDBD)))
-            } else {
-                segments
-            }.forEach { (label, _, color) ->
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Box(
+                    Modifier
+                        .size(10.dp)
+                        .clip(CircleShape)
+                        .background(Color(0xFF4A90D9)),
+                )
+                Spacer(Modifier.width(4.dp))
+                Text(
+                    "Used",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+            if (free > 0) {
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Box(
                         Modifier
                             .size(10.dp)
                             .clip(CircleShape)
-                            .background(color),
+                            .background(Color(0xFFE0E0E0)),
                     )
                     Spacer(Modifier.width(4.dp))
                     Text(
-                        label,
+                        "Free",
                         style = MaterialTheme.typography.labelSmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
@@ -1667,8 +1673,6 @@ private fun TokenBreakdownBar(
         }
     }
 }
-
-private data class TokenSegment(val label: String, val tokens: Long, val color: Color)
 
 private fun formatTimestamp(epochMillis: Long): String {
     if (epochMillis <= 0) return "—"
