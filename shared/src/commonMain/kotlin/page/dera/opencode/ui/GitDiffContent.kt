@@ -228,9 +228,18 @@ fun GitDiffContent(api: OpencodeApi, directory: String, fileChangeTick: Int = 0)
 
     LaunchedEffect(fileChangeTick) {
         if (fileChangeTick > 0) {
-            reviewedFiles.clear()
+            val oldDiff = diffMap
             api.getVcsDiff(directory).fold(
-                onSuccess = { diffs -> diffMap = diffs.associateBy { it.file }; hasChanges = diffs.isNotEmpty() },
+                onSuccess = { diffs ->
+                    val newDiff = diffs.associateBy { it.file }
+                    diffMap = newDiff
+                    hasChanges = diffs.isNotEmpty()
+                    reviewedFiles.removeAll { path ->
+                        val old = oldDiff[path]?.patch
+                        val new = newDiff[path]?.patch
+                        old != new
+                    }
+                },
                 onFailure = { },
             )
         }
