@@ -721,7 +721,7 @@ fun SessionDetailScreen(api: OpencodeApi, sessionId: String, sessionTitle: Strin
             if (selectedTab == 2) {
                 TodoContent(todos)
             } else if (selectedTab == 3) {
-                Box(Modifier.fillMaxSize().imePadding()) {
+                Box(Modifier.fillMaxSize()) {
                     TerminalContent(api, directory)
                 }
             } else if (selectedTab != 0) {
