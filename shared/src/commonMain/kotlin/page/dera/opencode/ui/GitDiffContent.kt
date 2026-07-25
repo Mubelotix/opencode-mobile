@@ -24,6 +24,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.derivedStateOf
@@ -287,37 +288,46 @@ fun GitDiffContent(api: OpencodeApi, directory: String) {
                 Text(if (drawerOpen) "\u2715" else "Files", style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.primary, modifier = Modifier.clickable { drawerOpen = !drawerOpen }.padding(horizontal = 8.dp, vertical = 6.dp))
                 Text(view?.path ?: directory.substringAfterLast('/'), style = MaterialTheme.typography.labelSmall.copy(fontFamily = FontFamily.Monospace), color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f))
                 if (view?.stats != null) {
-                    val (adds, dels) = view.stats!!
+                    val (adds, dels) = view.stats!!; Spacer(Modifier.width(8.dp))
                     if (adds > 0) Text("+$adds", style = MaterialTheme.typography.labelSmall, color = AddFg)
                     if (adds > 0 && dels > 0) Spacer(Modifier.width(4.dp))
                     if (dels > 0) Text("-$dels", style = MaterialTheme.typography.labelSmall, color = DelFg)
-                    Spacer(Modifier.width(8.dp))
-                }
-                if (unreviewedFiles.isNotEmpty() && view != null) {
-                    val isCurrentReviewed = view.path in reviewedFiles
-                    Text(
-                        if (isCurrentReviewed) "\u2713" else "\u25CB",
-                        style = MaterialTheme.typography.labelSmall.copy(fontSize = 12.sp),
-                        color = if (isCurrentReviewed) AddFg else MaterialTheme.colorScheme.onSurfaceVariant,
-                        modifier = Modifier.clickable { toggleReviewed(view.path) }.padding(horizontal = 4.dp),
-                    )
-                    Text("${unreviewedFiles.size}", style = MaterialTheme.typography.labelSmall, color = ModFg)
-                    Spacer(Modifier.width(2.dp))
-                    Text("\u25C0", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.clickable { navigateReview(-1) }.padding(horizontal = 6.dp, vertical = 6.dp))
-                    Text("\u25B6", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.clickable { navigateReview(1) }.padding(horizontal = 6.dp, vertical = 6.dp))
                 }
             }
             Box(Modifier.weight(1f).fillMaxWidth()) {
                 if (view != null) FileView(view, engine, theme)
                 else if (!hasChanges) Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) { Text("No changes", style = MaterialTheme.typography.bodyLarge, color = MaterialTheme.colorScheme.onSurfaceVariant) }
+                else if (unreviewedFiles.isNotEmpty()) Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                    Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                        Text("${unreviewedFiles.size} files to review", style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        TextButton(onClick = { navigateReview(1) }) { Text("Start review") }
+                    }
+                }
                 else Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) { Text("Tap Files to browse", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant) }
+            }
+            if (unreviewedFiles.isNotEmpty() && view != null) {
+                val isCurrentReviewed = view.path in reviewedFiles
+                Row(
+                    Modifier.fillMaxWidth().background(MaterialTheme.colorScheme.surface).padding(horizontal = 12.dp, vertical = 6.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Text(
+                        if (isCurrentReviewed) "\u2713" else "\u25CB",
+                        style = MaterialTheme.typography.labelMedium.copy(fontSize = 16.sp),
+                        color = if (isCurrentReviewed) AddFg else MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier.clickable { toggleReviewed(view.path) }.padding(end = 8.dp),
+                    )
+                    Text("${unreviewedFiles.size} remaining", style = MaterialTheme.typography.labelSmall, color = ModFg, modifier = Modifier.weight(1f))
+                    Text("\u25C0  Prev", style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.clickable { navigateReview(-1) }.padding(horizontal = 8.dp, vertical = 4.dp))
+                    Text("Next  \u25B6", style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.primary, modifier = Modifier.clickable { navigateReview(1) }.padding(horizontal = 8.dp, vertical = 4.dp))
+                }
             }
         }
         AnimatedVisibility(visible = drawerOpen, enter = slideInHorizontally(initialOffsetX = { -it }), exit = slideOutHorizontally(targetOffsetX = { -it })) {
             Box(Modifier.fillMaxSize()) {
                 Box(Modifier.fillMaxSize().background(Color.Black.copy(alpha = 0.3f)).clickable { drawerOpen = false })
                 Box(Modifier.fillMaxHeight().width(260.dp).shadow(4.dp).background(MaterialTheme.colorScheme.surface)) {
-                    FileTreeContent(visibleEntries, isDark, drawerOpen, ::toggleDir, ::openFile, view?.path, reviewedFiles, ::toggleReviewed)
+                    FileTreeContent(visibleEntries, isDark, drawerOpen, ::toggleDir, ::openFile, view?.path, reviewedFiles, diffMap)
                 }
             }
         }
@@ -328,17 +338,27 @@ fun GitDiffContent(api: OpencodeApi, directory: String) {
 private fun FileTreeContent(
     entries: List<TreeEntry>, isDark: Boolean, isVisible: Boolean,
     onToggleDir: (String) -> Unit, onOpenFile: (String) -> Unit, selectedPath: String?,
-    reviewedFiles: List<String>, onToggleReviewed: (String) -> Unit,
+    reviewedFiles: List<String>, diffMap: Map<String, FileDiff>,
 ) {
-    val statusAdd = if (isDark) Color(0xFF3FB950) else Color(0xFF1A7F37)
-    val statusDel = if (isDark) Color(0xFFF85149) else Color(0xFFCF222E)
-    val statusMod = if (isDark) Color(0xFFD2A8FF) else ModFg
+    val unreviewed = if (isDark) Color(0xFFFFD700) else Color(0xFFFFA000)
 
     LazyColumn(Modifier.fillMaxSize()) {
         items(entries, key = { it.path.ifEmpty { "/" } + if (it.isDirectory) "d" else "f" }) { entry ->
             if (!isVisible) return@items
             val isSelected = entry.path == selectedPath
-            val statusColor = if (entry.isDirectory && entry.hasChanges) statusMod else Color.Transparent
+            val isReviewed = entry.path in reviewedFiles
+            val indicator = when {
+                !entry.hasChanges -> null
+                entry.isDirectory -> {
+                    val folderReviewed = diffMap.keys
+                        .filter { it.startsWith("${entry.path}/") }
+                        .all { it in reviewedFiles }
+                    if (folderReviewed) "\u2713" to AddFg
+                    else "\u2022" to unreviewed
+                }
+                isReviewed -> "\u2713" to AddFg
+                else -> "\u2022" to unreviewed
+            }
             val nameColor = when {
                 isSelected -> MaterialTheme.colorScheme.primary
                 entry.hasChanges -> MaterialTheme.colorScheme.onSurface
@@ -358,25 +378,9 @@ private fun FileTreeContent(
                 ) else Spacer(Modifier.width(12.dp))
                 Spacer(Modifier.width(2.dp))
                 Text(entry.name, style = MaterialTheme.typography.labelSmall.copy(fontFamily = FontFamily.Monospace), color = nameColor, maxLines = 1, overflow = TextOverflow.Ellipsis)
-                if (entry.hasChanges && !entry.isDirectory && (entry.additions > 0 || entry.deletions > 0)) {
+                if (indicator != null) {
                     Spacer(Modifier.width(4.dp))
-                    Text("+${entry.additions}", style = MaterialTheme.typography.labelSmall.copy(fontSize = 9.sp), color = statusAdd)
-                    if (entry.additions > 0 && entry.deletions > 0) Text(" ", style = MaterialTheme.typography.labelSmall.copy(fontSize = 9.sp))
-                    if (entry.deletions > 0) Text("-${entry.deletions}", style = MaterialTheme.typography.labelSmall.copy(fontSize = 9.sp), color = statusDel)
-                }
-                if (entry.hasChanges && !entry.isDirectory) {
-                    Spacer(Modifier.width(4.dp))
-                    val isReviewed = entry.path in reviewedFiles
-                    Text(
-                        if (isReviewed) "\u2713" else "\u25CB",
-                        style = MaterialTheme.typography.labelSmall.copy(fontSize = 10.sp),
-                        color = if (isReviewed) AddFg else MaterialTheme.colorScheme.onSurfaceVariant,
-                        modifier = Modifier.clickable { onToggleReviewed(entry.path) }.padding(horizontal = 2.dp),
-                    )
-                }
-                if (entry.hasChanges) {
-                    Spacer(Modifier.width(4.dp))
-                    Box(Modifier.width(6.dp).height(6.dp).clip(RoundedCornerShape(3.dp)).background(statusColor))
+                    Text(indicator.first, style = MaterialTheme.typography.labelSmall.copy(fontSize = 12.sp), color = indicator.second)
                 }
             }
         }
