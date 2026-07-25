@@ -121,7 +121,6 @@ import opencodeapp.shared.generated.resources.file
 import opencodeapp.shared.generated.resources.folder
 import opencodeapp.shared.generated.resources.terminal
 import opencodeapp.shared.generated.resources.triangle_alert
-import opencodeapp.shared.generated.resources.gitBranchIcon
 import opencodeapp.shared.generated.resources.listChecksIcon
 import opencodeapp.shared.generated.resources.clipboardListIcon
 import opencodeapp.shared.generated.resources.menuIcon
@@ -622,12 +621,11 @@ fun SessionDetailScreen(api: OpencodeApi, sessionId: String, sessionTitle: Strin
             ) {
                 val tabs = listOf(
                     Triple(messageSquareIcon, "Conversation", 0),
-                    Triple(gitBranchIcon, "Git", 1),
-                    Triple(folderIcon, "Files", 2),
-                    Triple(listChecksIcon, "Todo", 3),
-                    Triple(terminalIcon, "Terminal", 4),
-                    Triple(infoIcon, "Info", 5),
-                    Triple(globeIcon, "Browser", 6),
+                    Triple(folderIcon, "Files", 1),
+                    Triple(listChecksIcon, "Todo", 2),
+                    Triple(terminalIcon, "Terminal", 3),
+                    Triple(infoIcon, "Info", 4),
+                    Triple(globeIcon, "Browser", 5),
                 )
                 tabs.forEach { (icon, desc, index) ->
                     val isSelected = selectedTab == index
@@ -736,19 +734,19 @@ fun SessionDetailScreen(api: OpencodeApi, sessionId: String, sessionTitle: Strin
                     )
                 }
             }
-            if (selectedTab == 3) {
+            if (selectedTab == 2) {
                 TodoContent(todos)
-            } else if (selectedTab == 4) {
+            } else if (selectedTab == 3) {
                 Box(Modifier.fillMaxSize()) {
                     TerminalContent(api, directory)
                 }
-            } else if (selectedTab == 5) {
+            } else if (selectedTab == 4) {
                 InfoContent(sessionTokens, sessionCost, sessionModel, providers, messages)
-            } else if (selectedTab != 0 && selectedTab != 1 && selectedTab != 2) {
+            } else if (selectedTab != 0 && selectedTab != 1) {
                 Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
                     Text(
                     when (selectedTab) {
-                        6 -> "Browser"
+                        5 -> "Browser"
                         else -> ""
                     },
                         style = MaterialTheme.typography.bodyLarge,
@@ -759,12 +757,6 @@ fun SessionDetailScreen(api: OpencodeApi, sessionId: String, sessionTitle: Strin
             Box(
                 Modifier.fillMaxSize()
                     .then(if (selectedTab == 1) Modifier else Modifier.alpha(0f))
-            ) {
-                GitReviewContent(api, directory)
-            }
-            Box(
-                Modifier.fillMaxSize()
-                    .then(if (selectedTab == 2) Modifier else Modifier.alpha(0f))
             ) {
                 GitDiffContent(api, directory)
             }
