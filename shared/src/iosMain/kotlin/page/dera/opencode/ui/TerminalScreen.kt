@@ -52,6 +52,9 @@ import page.dera.opencode.api.OpencodeApi
 import page.dera.opencode.api.PtyCreatePayload
 
 @Composable
+actual fun rememberImeBottomDp(): Float = 0f
+
+@Composable
 actual fun TerminalContent(api: OpencodeApi, directory: String) {
     val scope = rememberCoroutineScope()
     var ptyId by remember { mutableStateOf<String?>(null) }

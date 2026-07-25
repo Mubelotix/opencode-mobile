@@ -5,3 +5,6 @@ import page.dera.opencode.api.OpencodeApi
 
 @Composable
 expect fun TerminalContent(api: OpencodeApi, directory: String)
+
+@Composable
+expect fun rememberImeBottomDp(): Float

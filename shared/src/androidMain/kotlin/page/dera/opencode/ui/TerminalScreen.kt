@@ -4,7 +4,6 @@ import android.os.Looper
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
-import androidx.compose.foundation.layout.padding
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
@@ -32,6 +31,25 @@ import page.dera.opencode.api.OpencodeApi
 import page.dera.opencode.api.PtyCreatePayload
 
 @Composable
+actual fun rememberImeBottomDp(): Float {
+    val density = LocalDensity.current
+    var imeBottomPx by remember { mutableFloatStateOf(0f) }
+    val view = LocalView.current
+
+    DisposableEffect(view) {
+        ViewCompat.setOnApplyWindowInsetsListener(view) { _, insets ->
+            imeBottomPx = insets.getInsets(WindowInsetsCompat.Type.ime()).bottom.toFloat()
+            insets
+        }
+        onDispose {
+            ViewCompat.setOnApplyWindowInsetsListener(view, null)
+        }
+    }
+
+    return with(density) { imeBottomPx.toDp().value }
+}
+
+@Composable
 actual fun TerminalContent(api: OpencodeApi, directory: String) {
     val scope = rememberCoroutineScope()
     var ptyId by remember { mutableStateOf<String?>(null) }
@@ -54,22 +72,6 @@ actual fun TerminalContent(api: OpencodeApi, directory: String) {
             },
         )
     }
-
-    val density = LocalDensity.current
-    var imeBottomPx by remember { mutableFloatStateOf(0f) }
-    val view = LocalView.current
-
-    DisposableEffect(view) {
-        ViewCompat.setOnApplyWindowInsetsListener(view) { _, insets ->
-            imeBottomPx = insets.getInsets(WindowInsetsCompat.Type.ime()).bottom.toFloat()
-            insets
-        }
-        onDispose {
-            ViewCompat.setOnApplyWindowInsetsListener(view, null)
-        }
-    }
-
-    val imeBottomDp = with(density) { imeBottomPx.toDp() }
 
     LaunchedEffect(Unit) {
         val result = api.listPtys(directory)
@@ -121,7 +123,7 @@ actual fun TerminalContent(api: OpencodeApi, directory: String) {
             CircularProgressIndicator(color = Color.White)
         }
     } else {
-        Box(Modifier.fillMaxSize().padding(bottom = imeBottomDp)) {
+        Box(Modifier.fillMaxSize()) {
             Terminal(
                 terminalEmulator = emulator,
                 keyboardEnabled = true,
