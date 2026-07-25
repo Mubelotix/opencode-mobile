@@ -622,12 +622,12 @@ fun SessionDetailScreen(api: OpencodeApi, sessionId: String, sessionTitle: Strin
             ) {
                 val tabs = listOf(
                     Triple(messageSquareIcon, "Conversation", 0),
-                    Triple(folderIcon, "Files", 1),
-                    Triple(listChecksIcon, "Todo", 2),
-                    Triple(terminalIcon, "Terminal", 3),
-                    Triple(infoIcon, "Info", 4),
-                    Triple(globeIcon, "Browser", 5),
-                    Triple(gitBranchIcon, "Git", 6),
+                    Triple(gitBranchIcon, "Git", 1),
+                    Triple(folderIcon, "Files", 2),
+                    Triple(listChecksIcon, "Todo", 3),
+                    Triple(terminalIcon, "Terminal", 4),
+                    Triple(infoIcon, "Info", 5),
+                    Triple(globeIcon, "Browser", 6),
                 )
                 tabs.forEach { (icon, desc, index) ->
                     val isSelected = selectedTab == index
@@ -736,20 +736,20 @@ fun SessionDetailScreen(api: OpencodeApi, sessionId: String, sessionTitle: Strin
                     )
                 }
             }
-            if (selectedTab == 2) {
+            if (selectedTab == 3) {
                 TodoContent(todos)
-            } else if (selectedTab == 3) {
+            } else if (selectedTab == 4) {
                 Box(Modifier.fillMaxSize()) {
                     TerminalContent(api, directory)
                 }
-            } else if (selectedTab == 4) {
+            } else if (selectedTab == 5) {
                 InfoContent(sessionTokens, sessionCost, sessionModel, providers, messages)
-            } else if (selectedTab != 0 && selectedTab != 1) {
+            } else if (selectedTab != 0 && selectedTab != 2) {
                 Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
                     Text(
                     when (selectedTab) {
-                        5 -> "Browser"
-                        6 -> "Git"
+                        1 -> "Git"
+                        6 -> "Browser"
                         else -> ""
                     },
                         style = MaterialTheme.typography.bodyLarge,
@@ -759,7 +759,7 @@ fun SessionDetailScreen(api: OpencodeApi, sessionId: String, sessionTitle: Strin
             }
             Box(
                 Modifier.fillMaxSize()
-                    .then(if (selectedTab == 1) Modifier else Modifier.alpha(0f))
+                    .then(if (selectedTab == 2) Modifier else Modifier.alpha(0f))
             ) {
                 GitDiffContent(api, directory)
             }
