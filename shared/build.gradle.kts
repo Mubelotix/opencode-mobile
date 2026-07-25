@@ -47,6 +47,7 @@ kotlin {
             implementation(libs.ktor.client.cio)
             implementation(libs.ktor.client.websockets)
             implementation(libs.androidx.activity.compose)
+            implementation(libs.termlib)
         }
         commonMain.dependencies {
             implementation(libs.compose.runtime)

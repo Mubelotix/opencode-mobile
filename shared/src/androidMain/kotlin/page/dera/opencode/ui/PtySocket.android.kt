@@ -27,7 +27,7 @@ actual suspend fun connectPtyWebSocket(
             coroutineScope {
                 val sender = launch {
                     for (cmd in commands) {
-                        try { send(Frame.Text("$cmd\r")) } catch (_: Exception) { break }
+                        try { send(Frame.Text(cmd)) } catch (_: Exception) { break }
                     }
                 }
                 for (frame in incoming) {
