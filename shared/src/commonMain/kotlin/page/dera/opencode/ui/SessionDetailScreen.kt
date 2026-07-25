@@ -122,6 +122,7 @@ import opencodeapp.shared.generated.resources.terminal
 import opencodeapp.shared.generated.resources.triangle_alert
 import opencodeapp.shared.generated.resources.gitBranchIcon
 import opencodeapp.shared.generated.resources.listChecksIcon
+import opencodeapp.shared.generated.resources.clipboardListIcon
 import opencodeapp.shared.generated.resources.menuIcon
 import opencodeapp.shared.generated.resources.messageSquareIcon
 import opencodeapp.shared.generated.resources.terminalIcon
@@ -1712,6 +1713,13 @@ private fun TodoContent(todos: List<TodoInfo>) {
     if (todos.isEmpty()) {
         Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
             Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                Icon(
+                    painterResource(clipboardListIcon),
+                    null,
+                    modifier = Modifier.size(64.dp),
+                    tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.4f),
+                )
+                Spacer(Modifier.height(16.dp))
                 Text(
                     "No tasks",
                     style = MaterialTheme.typography.bodyLarge,

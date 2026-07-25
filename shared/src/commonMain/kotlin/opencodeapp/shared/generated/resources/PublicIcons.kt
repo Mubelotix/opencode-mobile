@@ -19,3 +19,4 @@ val gitBranchIcon: DrawableResource get() = Res.drawable.git_branch
 val listChecksIcon: DrawableResource get() = Res.drawable.list_checks
 val terminalIcon: DrawableResource get() = Res.drawable.terminal
 val infoIcon: DrawableResource get() = Res.drawable.info
+val clipboardListIcon: DrawableResource get() = Res.drawable.clipboard_list
