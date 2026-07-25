@@ -67,6 +67,7 @@ kotlin {
             implementation(libs.multiplatform.settings.no.arg)
             implementation(libs.kotlinx.datetime)
             implementation(libs.intellij.markdown)
+            implementation(libs.syntaxmp)
         }
         iosMain.dependencies {
             implementation(libs.ktor.client.darwin)

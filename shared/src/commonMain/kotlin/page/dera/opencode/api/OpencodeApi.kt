@@ -192,6 +192,27 @@ class OpencodeApi(
         } catch (e: Exception) { Result.failure(e) }
     }
 
+    suspend fun getVcsDiff(directory: String, mode: String = "git"): Result<List<FileDiff>> {
+        return try {
+            val b = client.get("$serverUrl/vcs/diff") {
+                authHeader()?.let { (k, v) -> header(k, v) }
+                url.parameters.append("directory", directory)
+                url.parameters.append("mode", mode)
+            }.bodyAsText()
+            Result.success(json.decodeFromString<List<FileDiff>>(b))
+        } catch (e: Exception) { Result.failure(e) }
+    }
+
+    suspend fun readFile(directory: String, filePath: String): Result<String> {
+        return try {
+            val b = client.get("$serverUrl/api/fs/read/$filePath") {
+                authHeader()?.let { (k, v) -> header(k, v) }
+                header("x-opencode-directory", directory)
+            }.bodyAsText()
+            Result.success(b.trim())
+        } catch (e: Exception) { Result.failure(e) }
+    }
+
     suspend fun listPtys(directory: String): Result<PtyListResponse> {
         return try {
             val b = client.get("$serverUrl/api/pty") {
