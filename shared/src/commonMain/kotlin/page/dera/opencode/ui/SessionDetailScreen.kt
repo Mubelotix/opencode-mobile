@@ -105,6 +105,7 @@ import kotlinx.serialization.json.jsonArray
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
 import opencodeapp.shared.generated.resources.globeIcon
+import opencodeapp.shared.generated.resources.folderIcon
 import opencodeapp.shared.generated.resources.searchIcon
 import opencodeapp.shared.generated.resources.sendIcon
 import opencodeapp.shared.generated.resources.infoIcon
@@ -621,11 +622,12 @@ fun SessionDetailScreen(api: OpencodeApi, sessionId: String, sessionTitle: Strin
             ) {
                 val tabs = listOf(
                     Triple(messageSquareIcon, "Conversation", 0),
-                    Triple(gitBranchIcon, "Git Diff", 1),
+                    Triple(folderIcon, "Files", 1),
                     Triple(listChecksIcon, "Todo", 2),
                     Triple(terminalIcon, "Terminal", 3),
                     Triple(infoIcon, "Info", 4),
                     Triple(globeIcon, "Browser", 5),
+                    Triple(gitBranchIcon, "Git", 6),
                 )
                 tabs.forEach { (icon, desc, index) ->
                     val isSelected = selectedTab == index
@@ -747,6 +749,7 @@ fun SessionDetailScreen(api: OpencodeApi, sessionId: String, sessionTitle: Strin
                     Text(
                     when (selectedTab) {
                         5 -> "Browser"
+                        6 -> "Git"
                         else -> ""
                     },
                         style = MaterialTheme.typography.bodyLarge,

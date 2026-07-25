@@ -20,3 +20,5 @@ val listChecksIcon: DrawableResource get() = Res.drawable.list_checks
 val terminalIcon: DrawableResource get() = Res.drawable.terminal
 val infoIcon: DrawableResource get() = Res.drawable.info
 val clipboardListIcon: DrawableResource get() = Res.drawable.clipboard_list
+val folderIcon: DrawableResource get() = Res.drawable.folder
+val fileIcon: DrawableResource get() = Res.drawable.file
