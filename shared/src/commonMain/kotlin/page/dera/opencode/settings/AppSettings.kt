@@ -19,6 +19,23 @@ class AppSettings {
             else settings.remove(KEY_SERVER_PASSWORD)
         }
 
+    var wakatimeApiUrl: String?
+        get() = settings.getStringOrNull(KEY_WAKATIME_API_URL)
+        set(value) {
+            if (value != null) settings.putString(KEY_WAKATIME_API_URL, value)
+            else settings.remove(KEY_WAKATIME_API_URL)
+        }
+
+    var wakatimeApiKey: String?
+        get() = settings.getStringOrNull(KEY_WAKATIME_API_KEY)
+        set(value) {
+            if (value != null) settings.putString(KEY_WAKATIME_API_KEY, value)
+            else settings.remove(KEY_WAKATIME_API_KEY)
+        }
+
+    val isWakatimeConfigured: Boolean
+        get() = !wakatimeApiKey.isNullOrBlank()
+
     var pinnedFolders: List<String>
         get() {
             val raw = settings.getStringOrNull(KEY_PINNED_FOLDERS) ?: return emptyList()
@@ -49,5 +66,7 @@ class AppSettings {
         private const val KEY_SERVER_URL = "server_url"
         private const val KEY_SERVER_PASSWORD = "server_password"
         private const val KEY_PINNED_FOLDERS = "pinned_folders"
+        private const val KEY_WAKATIME_API_URL = "wakatime_api_url"
+        private const val KEY_WAKATIME_API_KEY = "wakatime_api_key"
     }
 }

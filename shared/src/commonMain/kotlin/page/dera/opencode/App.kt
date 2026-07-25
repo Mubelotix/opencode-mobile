@@ -38,6 +38,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
 import io.ktor.client.HttpClient
 import io.ktor.client.plugins.HttpTimeout
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import opencodeapp.shared.generated.resources.menuIcon
 import opencodeapp.shared.generated.resources.settingsIcon
@@ -45,6 +46,10 @@ import opencodeapp.shared.generated.resources.xIcon
 import org.jetbrains.compose.resources.painterResource
 import page.dera.opencode.api.OpencodeApi
 import page.dera.opencode.api.ValidationResult
+import page.dera.opencode.api.WakatimeApi
+import page.dera.opencode.api.WakatimeHeartbeat
+import page.dera.opencode.api.epochSecondsNow
+import page.dera.opencode.getPlatform
 import page.dera.opencode.settings.AppSettings
 import page.dera.opencode.ui.FileExplorerScreen
 import page.dera.opencode.ui.ProjectScreen
@@ -68,6 +73,14 @@ fun App() {
     val serverUrl = remember { OpencodeApi.normalizeUrl(settings.serverUrl ?: "") }
     val password = remember { settings.serverPassword }
     val api = remember { OpencodeApi(HttpClient { install(HttpTimeout) { requestTimeoutMillis = 300_000 } }, serverUrl, password) }
+
+    val wakatimeApi = remember {
+        val key = settings.wakatimeApiKey
+        if (key != null) {
+            WakatimeApi(HttpClient { install(HttpTimeout) { requestTimeoutMillis = 30_000 } },
+                WakatimeApi.normalizeUrl(settings.wakatimeApiUrl ?: WakatimeApi.DEFAULT_API_URL), key)
+        } else null
+    }
 
     var tabs by remember { mutableStateOf(listOf<Tab>()) }
     var activeTabId by remember { mutableStateOf<String?>(null) }
@@ -198,6 +211,7 @@ fun App() {
                         allTabs = tabs,
                         snackbarHostState = snackbarHostState,
                         settings = settings,
+                        wakatimeApi = wakatimeApi,
                         onUpdateTab = { updated -> tabs = tabs.map { if (it.id == updated.id) updated else it } },
                         onCloseTab = {
                             tabs = tabs.filter { t -> t.id != activeTab.id }
@@ -212,6 +226,7 @@ fun App() {
                     LandingContent(
                         screen = landingScreen,
                         settings = settings,
+                        wakatimeApi = wakatimeApi,
                         onNavigate = { landingScreen = it },
                         onOpenDrawer = { scope.launch { drawerState.open() } },
                         onOpenProject = { a, dir, name -> openProject(a, dir, name, null) },
@@ -226,6 +241,7 @@ fun App() {
 private fun LandingContent(
     screen: Screen,
     settings: AppSettings,
+    wakatimeApi: WakatimeApi?,
     onNavigate: (Screen) -> Unit,
     onOpenDrawer: () -> Unit,
     onOpenProject: (OpencodeApi, String, String) -> Unit,
@@ -270,6 +286,7 @@ private fun LandingContent(
         is Screen.Settings -> {
             SettingsScreen(
                 settings = settings,
+                wakatimeApi = wakatimeApi,
                 onDisconnect = {
                     settings.clear()
                     onNavigate(Screen.Welcome(screen.api))
@@ -286,6 +303,7 @@ private fun TabContent(
     allTabs: List<Tab>,
     snackbarHostState: SnackbarHostState,
     settings: AppSettings,
+    wakatimeApi: WakatimeApi?,
     onUpdateTab: (Tab) -> Unit,
     onCloseTab: () -> Unit,
     onCloseTabById: (String) -> Unit,
@@ -344,6 +362,25 @@ private fun TabContent(
         }
         is TabScreen.SessionDetail -> {
             BackHandler { onUpdateTab(tab.copy(screen = TabScreen.ProjectDetail(ts.api, ts.directory, ts.projectName))) }
+            if (wakatimeApi != null) {
+                LaunchedEffect(ts.session.id) {
+                    while (true) {
+                        val platform = getPlatform().name
+                        val os = if (platform.startsWith("Android")) "Android" else platform
+                        wakatimeApi.sendHeartbeat(
+                            WakatimeHeartbeat(
+                                entity = ts.session.location.directory,
+                                type = "app",
+                                time = epochSecondsNow(),
+                                category = "ai coding",
+                                project = ts.projectName,
+                                user_agent = "wakatime/1.0.0 ($os) opencode/1.0.0",
+                            )
+                        )
+                        delay(120_000L)
+                    }
+                }
+            }
             SessionDetailScreen(
                 api = ts.api,
                 sessionId = ts.session.id,

@@ -2,6 +2,7 @@ package page.dera.opencode.ui
 
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -13,6 +14,7 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
@@ -23,18 +25,24 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.ui.unit.dp
+import io.ktor.client.HttpClient
+import kotlinx.coroutines.launch
+import page.dera.opencode.api.ValidationResult
+import page.dera.opencode.api.WakatimeApi
 import page.dera.opencode.settings.AppSettings
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun SettingsScreen(
     settings: AppSettings,
+    wakatimeApi: WakatimeApi?,
     onDisconnect: () -> Unit,
     onBack: () -> Unit,
 ) {
@@ -42,6 +50,15 @@ fun SettingsScreen(
     var password by remember { mutableStateOf(settings.serverPassword ?: "") }
     var passwordVisible by remember { mutableStateOf(false) }
     var saved by remember { mutableStateOf(false) }
+
+    var wakatimeApiUrl by remember { mutableStateOf(settings.wakatimeApiUrl ?: WakatimeApi.DEFAULT_API_URL) }
+    var wakatimeApiKey by remember { mutableStateOf(settings.wakatimeApiKey ?: "") }
+    var wakatimeApiKeyVisible by remember { mutableStateOf(false) }
+    var wakatimeSaved by remember { mutableStateOf(false) }
+    var wakatimeValidating by remember { mutableStateOf(false) }
+    var wakatimeValidationMessage by remember { mutableStateOf<String?>(null) }
+    var wakatimeValidationIsError by remember { mutableStateOf(false) }
+    val scope = rememberCoroutineScope()
 
     BackHandler { onBack() }
 
@@ -63,7 +80,7 @@ fun SettingsScreen(
             Spacer(Modifier.height(8.dp))
 
             Text(
-                text = "Server",
+                text = "Opencode",
                 style = MaterialTheme.typography.titleMedium,
             )
 
@@ -101,6 +118,92 @@ fun SettingsScreen(
                 enabled = !saved,
             ) {
                 Text(if (saved) "Saved" else "Save")
+            }
+
+            Spacer(Modifier.height(16.dp))
+
+            HorizontalDivider()
+
+            Spacer(Modifier.height(16.dp))
+
+            Text(
+                text = "WakaTime",
+                style = MaterialTheme.typography.titleMedium,
+            )
+
+            OutlinedTextField(
+                value = wakatimeApiUrl,
+                onValueChange = { wakatimeApiUrl = it; wakatimeSaved = false },
+                label = { Text("API Endpoint") },
+                singleLine = true,
+                modifier = Modifier.fillMaxWidth(),
+                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Uri),
+            )
+
+            OutlinedTextField(
+                value = wakatimeApiKey,
+                onValueChange = { wakatimeApiKey = it; wakatimeSaved = false },
+                label = { Text("API Key") },
+                singleLine = true,
+                modifier = Modifier.fillMaxWidth(),
+                visualTransformation = if (wakatimeApiKeyVisible) VisualTransformation.None else PasswordVisualTransformation(),
+                trailingIcon = {
+                    TextButton(onClick = { wakatimeApiKeyVisible = !wakatimeApiKeyVisible }) {
+                        Text(if (wakatimeApiKeyVisible) "Hide" else "Show")
+                    }
+                },
+            )
+
+            wakatimeValidationMessage?.let {
+                Text(
+                    text = it,
+                    color = if (wakatimeValidationIsError) MaterialTheme.colorScheme.error
+                            else MaterialTheme.colorScheme.primary,
+                    style = MaterialTheme.typography.bodySmall,
+                )
+            }
+
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+            ) {
+                Button(
+                    onClick = {
+                        settings.wakatimeApiUrl = wakatimeApiUrl.ifBlank { null }
+                        settings.wakatimeApiKey = wakatimeApiKey.ifBlank { null }
+                        wakatimeSaved = true
+                    },
+                    modifier = Modifier.weight(1f).height(48.dp),
+                    enabled = !wakatimeSaved,
+                ) {
+                    Text(if (wakatimeSaved) "Saved" else "Save")
+                }
+
+                Button(
+                    onClick = {
+                        wakatimeValidating = true
+                        wakatimeValidationMessage = null
+                        wakatimeValidationIsError = false
+                        val api = WakatimeApi(
+                            HttpClient(),
+                            WakatimeApi.normalizeUrl(wakatimeApiUrl.ifBlank { WakatimeApi.DEFAULT_API_URL }),
+                            wakatimeApiKey,
+                        )
+                        scope.launch {
+                            val result = api.validate()
+                            wakatimeValidationMessage = when (result) {
+                                is ValidationResult.Success -> "Connected successfully"
+                                is ValidationResult.Error -> result.message
+                            }
+                            wakatimeValidationIsError = result is ValidationResult.Error
+                            wakatimeValidating = false
+                        }
+                    },
+                    modifier = Modifier.height(48.dp),
+                    enabled = !wakatimeValidating && wakatimeApiKey.isNotBlank(),
+                ) {
+                    Text(if (wakatimeValidating) "Testing..." else "Test Connection")
+                }
             }
 
             Spacer(Modifier.height(16.dp))
