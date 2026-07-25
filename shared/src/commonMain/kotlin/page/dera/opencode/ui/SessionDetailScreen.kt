@@ -77,6 +77,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.style.TextDecoration
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.zIndex
 import kotlin.time.Clock
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
@@ -654,6 +655,7 @@ fun SessionDetailScreen(api: OpencodeApi, sessionId: String, sessionTitle: Strin
         Box(Modifier.fillMaxSize().padding(padding)) {
             Column(
                 Modifier.fillMaxSize()
+                    .zIndex(if (selectedTab == 0) 1f else 0f)
                     .then(if (selectedTab == 0) Modifier else Modifier.alpha(0f))
             ) {
                 if (errorText != null) {
@@ -758,6 +760,7 @@ fun SessionDetailScreen(api: OpencodeApi, sessionId: String, sessionTitle: Strin
             }
             Box(
                 Modifier.fillMaxSize()
+                    .zIndex(if (selectedTab == 1) 1f else 0f)
                     .then(if (selectedTab == 1) Modifier else Modifier.alpha(0f))
             ) {
                 GitDiffContent(api, directory, fileChangeTick)
