@@ -113,7 +113,7 @@ import com.russhwolf.settings.get
 import com.russhwolf.settings.set
 import kotlinx.serialization.builtins.ListSerializer
 import opencodeapp.shared.generated.resources.globeIcon
-import opencodeapp.shared.generated.resources.folderIcon
+import opencodeapp.shared.generated.resources.gitBranchIcon
 import opencodeapp.shared.generated.resources.scissorsIcon
 import opencodeapp.shared.generated.resources.searchIcon
 import opencodeapp.shared.generated.resources.sendIcon
@@ -671,7 +671,7 @@ fun SessionDetailScreen(api: OpencodeApi, sessionId: String, sessionTitle: Strin
             ) {
                 val tabs = listOf(
                     Triple(messageSquareIcon, "Conversation", 0),
-                    Triple(folderIcon, "Files", 1),
+                    Triple(gitBranchIcon, "Files", 1),
                     Triple(listChecksIcon, "Todo", 2),
                     Triple(terminalIcon, "Terminal", 3),
                     Triple(infoIcon, "Info", 4),
