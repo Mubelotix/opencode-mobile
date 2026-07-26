@@ -72,6 +72,7 @@ import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.ColorFilter
 import androidx.compose.ui.graphics.painter.Painter
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.input.ImeAction
@@ -1447,17 +1448,41 @@ private fun ToolPart(row: AssistantPartRow, painters: ChatPainters) {
             Box(Modifier.size(6.dp).clip(CircleShape).background(tc))
         }
     } else if (part.tool == "bash") {
+        val output = remember(part) {
+            when (val s = part.state) {
+                is LegacyToolState.Completed -> s.output.takeIf { it.isNotBlank() }
+                is LegacyToolState.Error -> s.error.takeIf { it.isNotBlank() }
+                else -> null
+            }
+        }
+        val shortOutput = output?.lines()?.size?.let { it <= 5 } == true
+        var outputMode by remember { mutableStateOf(if (shortOutput) BashOutputMode.FULL else BashOutputMode.LAST_5) }
+        val clickMod = if (output != null) Modifier.clickable {
+            outputMode = if (shortOutput) {
+                if (outputMode == BashOutputMode.COLLAPSED) BashOutputMode.FULL else BashOutputMode.COLLAPSED
+            } else {
+                when (outputMode) {
+                    BashOutputMode.COLLAPSED -> BashOutputMode.LAST_5
+                    BashOutputMode.LAST_5 -> BashOutputMode.FULL
+                    BashOutputMode.FULL -> BashOutputMode.COLLAPSED
+                }
+            }
+        } else Modifier
         Box(
             Modifier
                 .fillMaxWidth()
                 .padding(vertical = 2.dp)
+                .then(clickMod)
                 .clip(RoundedCornerShape(8.dp))
                 .background(Color(0xFF1E1E2E))
                 .padding(10.dp),
         ) {
             Column {
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Image(painters.terminal, null, Modifier.size(14.dp))
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    modifier = Modifier.fillMaxWidth(),
+                ) {
+                    Image(painters.terminal, null, Modifier.size(14.dp), colorFilter = ColorFilter.tint(Color(0xFFCDD6F4)))
                     Spacer(Modifier.width(6.dp))
                     Text(
                         label,
@@ -1483,6 +1508,23 @@ private fun ToolPart(row: AssistantPartRow, painters: ChatPainters) {
                             color = Color(0xFFA6ADC8),
                         )
                     }
+                }
+                if (output != null && outputMode != BashOutputMode.COLLAPSED) {
+                    Spacer(Modifier.height(4.dp))
+                    val displayedOutput = when (outputMode) {
+                        BashOutputMode.LAST_5 -> {
+                            val lines = output.lines()
+                            if (lines.size > 5) "… (${lines.size - 5} more lines above)\n" + lines.takeLast(5).joinToString("\n") else output
+                        }
+                        BashOutputMode.FULL -> output
+                        else -> ""
+                    }
+                    Text(
+                        displayedOutput,
+                        style = MaterialTheme.typography.bodySmall,
+                        fontFamily = FontFamily.Monospace,
+                        color = Color(0xFFA6ADC8),
+                    )
                 }
             }
         }
@@ -1644,6 +1686,8 @@ private fun ToolPart(row: AssistantPartRow, painters: ChatPainters) {
 private fun truncateForDisplay(s: String, max: Int = 8000): String =
     if (s.length <= max) s else s.take(max) + "\n… (${s.length - max} more characters)"
 
+private enum class BashOutputMode { COLLAPSED, LAST_5, FULL }
+
 private data class EditDiffLine(val content: String, val isAddition: Boolean, val isDeletion: Boolean)
 
 private fun computeEditDiff(oldString: String, newString: String): List<EditDiffLine> {
@@ -1740,7 +1784,7 @@ private fun toolLabel(part: LegacyPart, projectRoot: String): String {
     return when(part.tool) {
         "read","write","edit" -> obj["filePath"]?.toString()?.removeSurrounding("\"")?.let { relativePath(it, projectRoot) }?.ifEmpty{null} ?: (part.tool ?: "tool")
         "glob","grep" -> obj["pattern"]?.toString()?.removeSurrounding("\"").let{ if(it!=null&&it.length>40) it.take(40)+"..." else it} ?: (part.tool ?: "tool")
-        "bash" -> obj["command"]?.toString()?.removeSurrounding("\"").let{ if(it!=null) "$$it" else null} ?: "bash"
+        "bash" -> obj["command"]?.toString()?.removeSurrounding("\"").let{ if(it!=null) it else null} ?: "bash"
         "task" -> {
             val subType = obj["subagent_type"]?.toString()?.removeSurrounding("\"") ?: ""
             if (subType.isNotBlank()) "Launched $subType agent" else "Launched agent"
