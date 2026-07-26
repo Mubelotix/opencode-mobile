@@ -126,12 +126,6 @@ fun SettingsScreen(
 
             HorizontalDivider()
 
-            Spacer(Modifier.height(16.dp))
-
-            HorizontalDivider()
-
-            Spacer(Modifier.height(16.dp))
-
             Text(
                 text = "Display",
                 style = MaterialTheme.typography.titleMedium,
@@ -178,6 +172,10 @@ fun SettingsScreen(
                     },
                 )
             }
+
+            Spacer(Modifier.height(16.dp))
+
+            HorizontalDivider()
 
             Spacer(Modifier.height(16.dp))
 
@@ -260,6 +258,10 @@ fun SettingsScreen(
                     Text(if (wakatimeValidating) "Testing..." else "Test Connection")
                 }
             }
+
+            Spacer(Modifier.height(16.dp))
+
+            HorizontalDivider()
 
             Spacer(Modifier.height(16.dp))
 
