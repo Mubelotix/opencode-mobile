@@ -1,17 +1,21 @@
 package page.dera.opencode.ui
 
+import androidx.compose.foundation.Image
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -28,8 +32,27 @@ import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.unit.dp
 import io.ktor.client.HttpClient
 import kotlinx.coroutines.delay
+import opencodeapp.shared.generated.resources.arrowLeftIcon
+import opencodeapp.shared.generated.resources.arrowRightIcon
+import opencodeapp.shared.generated.resources.listIcon
+import opencodeapp.shared.generated.resources.rotateCwIcon
+import org.jetbrains.compose.resources.painterResource
 import page.dera.opencode.api.PortScannerApi
 import page.dera.opencode.settings.AppSettings
+
+enum class BrowserCommand { GO_BACK, GO_FORWARD, RELOAD }
+
+class BrowserControls {
+    var trigger by mutableIntStateOf(0)
+        private set
+    var command by mutableStateOf<BrowserCommand?>(null)
+        private set
+
+    fun goBack() { command = BrowserCommand.GO_BACK; trigger++ }
+    fun goForward() { command = BrowserCommand.GO_FORWARD; trigger++ }
+    fun reload() { command = BrowserCommand.RELOAD; trigger++ }
+    fun clear() { command = null }
+}
 
 @Composable
 fun BrowserContent(settings: AppSettings) {
@@ -75,10 +98,63 @@ fun BrowserContent(settings: AppSettings) {
         }
     }
 
+    LaunchedEffect(ports) {
+        val portList = ports
+        if (portList != null && portList.size == 1) {
+            selectedPort = portList.first()
+        }
+    }
+
     if (selectedPort > 0) {
         val url = urlPattern.replace("<port>", selectedPort.toString())
-        Box(Modifier.fillMaxSize()) {
-            WebViewContent(url)
+        val controls = remember { BrowserControls() }
+        Column(Modifier.fillMaxSize()) {
+            Row(modifier = Modifier.fillMaxWidth().padding(horizontal = 4.dp, vertical = 2.dp)) {
+                IconButton(
+                    onClick = { controls.goBack() },
+                    modifier = Modifier.size(36.dp),
+                ) {
+                    Image(
+                        painter = painterResource(arrowLeftIcon),
+                        contentDescription = "Back",
+                        modifier = Modifier.size(20.dp),
+                    )
+                }
+                IconButton(
+                    onClick = { controls.goForward() },
+                    modifier = Modifier.size(36.dp),
+                ) {
+                    Image(
+                        painter = painterResource(arrowRightIcon),
+                        contentDescription = "Forward",
+                        modifier = Modifier.size(20.dp),
+                    )
+                }
+                IconButton(
+                    onClick = { controls.reload() },
+                    modifier = Modifier.size(36.dp),
+                ) {
+                    Image(
+                        painter = painterResource(rotateCwIcon),
+                        contentDescription = "Reload",
+                        modifier = Modifier.size(20.dp),
+                    )
+                }
+                Spacer(Modifier.weight(1f))
+                IconButton(
+                    onClick = { selectedPort = -1 },
+                    modifier = Modifier.size(36.dp),
+                ) {
+                    Image(
+                        painter = painterResource(listIcon),
+                        contentDescription = "Port selector",
+                        modifier = Modifier.size(20.dp),
+                    )
+                }
+            }
+            Box(Modifier.weight(1f).fillMaxWidth()) {
+                WebViewContent(url, controls)
+            }
         }
     } else {
         val portList = ports
@@ -103,14 +179,6 @@ fun BrowserContent(settings: AppSettings) {
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
                         )
                     }
-                }
-            }
-            portList != null && portList.size == 1 -> {
-                val port = portList.first()
-                val url = urlPattern.replace("<port>", port.toString())
-                selectedPort = port
-                Box(Modifier.fillMaxSize()) {
-                    WebViewContent(url)
                 }
             }
             portList != null && portList.isEmpty() -> {
@@ -172,4 +240,4 @@ fun BrowserContent(settings: AppSettings) {
 }
 
 @Composable
-expect fun WebViewContent(url: String)
+expect fun WebViewContent(url: String, controls: BrowserControls? = null)

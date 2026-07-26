@@ -24,3 +24,7 @@ val folderIcon: DrawableResource get() = Res.drawable.folder
 val fileIcon: DrawableResource get() = Res.drawable.file
 val filePenIcon: DrawableResource get() = Res.drawable.file_pen
 val scissorsIcon: DrawableResource get() = Res.drawable.scissors
+val arrowLeftIcon: DrawableResource get() = Res.drawable.arrow_left
+val arrowRightIcon: DrawableResource get() = Res.drawable.arrow_right
+val rotateCwIcon: DrawableResource get() = Res.drawable.rotate_cw
+val listIcon: DrawableResource get() = Res.drawable.list
