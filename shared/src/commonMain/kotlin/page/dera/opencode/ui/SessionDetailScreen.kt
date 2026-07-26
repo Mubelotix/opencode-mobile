@@ -307,7 +307,7 @@ private fun buildRows(messages: List<LegacyWithParts>, showIndicator: Boolean, p
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun SessionDetailScreen(api: OpencodeApi, sessionId: String, sessionTitle: String, directory: String, projectRoot: String, onBack: () -> Unit, onMenuClick: (() -> Unit)? = null, onTitleChange: ((String) -> Unit)? = null, onDeleteSession: (() -> Unit)? = null) {
+fun SessionDetailScreen(api: OpencodeApi, sessionId: String, sessionTitle: String, directory: String, projectRoot: String, onBack: () -> Unit, onMenuClick: (() -> Unit)? = null, onTitleChange: ((String) -> Unit)? = null, onDeleteSession: (() -> Unit)? = null, settings: page.dera.opencode.settings.AppSettings = remember { page.dera.opencode.settings.AppSettings() }) {
     val messages = remember { mutableStateListOf<LegacyWithParts>() }
     @OptIn(ExperimentalFoundationApi::class)
     val listState = rememberLazyListState(prefetchStrategy = remember { DeepPrefetchStrategy(depth = 8) })
@@ -907,13 +907,10 @@ fun SessionDetailScreen(api: OpencodeApi, sessionId: String, sessionTitle: Strin
                 }
             } else if (selectedTab == 4) {
                 InfoContent(sessionTokens, sessionCost, sessionModel, providers, messages, sessionId, api, directory, onDeleteSession)
-            } else if (selectedTab != 0 && selectedTab != 1) {
+            } else if (selectedTab != 0 && selectedTab != 1 && selectedTab != 5) {
                 Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
                     Text(
-                    when (selectedTab) {
-                        5 -> "Browser"
-                        else -> ""
-                    },
+                        "",
                         style = MaterialTheme.typography.bodyLarge,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
@@ -925,6 +922,13 @@ fun SessionDetailScreen(api: OpencodeApi, sessionId: String, sessionTitle: Strin
                     .then(if (selectedTab == 1) Modifier else Modifier.alpha(0f))
             ) {
                 GitDiffContent(api, directory, fileChangeTick, reviewComments)
+            }
+            Box(
+                Modifier.fillMaxSize()
+                    .zIndex(if (selectedTab == 5) 1f else 0f)
+                    .then(if (selectedTab == 5) Modifier else Modifier.alpha(0f))
+            ) {
+                BrowserContent(settings)
             }
         }
     }
