@@ -34,3 +34,17 @@ XDG_DATA_HOME=./.tmp OPENCODE_CONFIG_DIR=./.tmp/opencode-config OPENCODE_SERVER_
 The server listens on `http://0.0.0.0:4096` with HTTP Basic Auth:
 - Username: `opencode`
 - Password: `mysecret`
+
+### 3. Port Scanner (optional)
+
+Run the port scanner on the same machine to enable the Browser tab in the app:
+
+```bash
+PORT_SCANNER_PASSWORD=mysecret PORT_SCANNER_PORT=8765 python3 scripts/port_scanner.py
+```
+
+Environment variables:
+- `PORT_SCANNER_PASSWORD` — shared auth password (must match opencode server password)
+- `PORT_SCANNER_PORT` — port for the scanner itself (default: 8765)
+
+The scanner returns a JSON list of listening TCP ports on the machine. Configure its endpoint in the app's Settings under "Port Scanner".
