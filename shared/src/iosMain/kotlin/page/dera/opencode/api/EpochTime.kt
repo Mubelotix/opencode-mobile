@@ -1,5 +1,7 @@
 package page.dera.opencode.api
 
-import platform.Foundation.NSDate
+import kotlinx.cinterop.ExperimentalForeignApi
+import platform.posix.time
 
-actual fun epochSecondsNow(): Double = NSDate().timeIntervalSince1970
+@OptIn(ExperimentalForeignApi::class)
+actual fun epochSecondsNow(): Double = time(null).toDouble()
