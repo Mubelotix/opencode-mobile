@@ -700,7 +700,7 @@ fun SessionDetailScreen(api: OpencodeApi, sessionId: String, sessionTitle: Strin
                             items(rows, key = { it.key }, contentType = { it.contentType }) { row ->
                                 Box(Modifier.timedMeasure(row.key, thresholdMs = 4.0)) {
                                     val t0 = Perf.clock.markNow()
-                                    ChatRowContent(row, streamingText, chatPainters)
+                                    ChatRowContent(row, streamingText, chatPainters, onInterrupt = if (row is IndicatorRow) {{ scope.launch { api.interruptSession(sessionId) } }} else null)
                                     val elapsed = Perf.ms(t0)
                                     if (elapsed >= 2.0) println("OC_PERF: compose row=${row.key} type=${row.contentType} took=${elapsed}ms")
                                 }
@@ -807,8 +807,13 @@ fun SessionDetailScreen(api: OpencodeApi, sessionId: String, sessionTitle: Strin
 }
 
 @Composable
-private fun SendingIndicator() {
-    Box(Modifier.fillMaxWidth(), contentAlignment = Alignment.Center) {
+private fun SendingIndicator(onInterrupt: (() -> Unit)? = null) {
+    Box(
+        Modifier
+            .fillMaxWidth()
+            .then(if (onInterrupt != null) Modifier.clickable { onInterrupt() } else Modifier),
+        contentAlignment = Alignment.Center,
+    ) {
         Row(
             verticalAlignment = Alignment.CenterVertically,
             modifier = Modifier.padding(8.dp),
@@ -816,7 +821,8 @@ private fun SendingIndicator() {
             CircularProgressIndicator(Modifier.size(16.dp), strokeWidth = 2.dp)
             Spacer(Modifier.width(8.dp))
             Text(
-                "OpenCode responding...",
+                if (onInterrupt != null) "OpenCode is generating (tap to stop)"
+                else "OpenCode responding...",
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.outline,
             )
@@ -1105,7 +1111,7 @@ private fun QuestionPrompt(req: QuestionRequest, api: OpencodeApi, sessionId: St
 }
 
 @Composable
-private fun ChatRowContent(row: ChatRow, streamingText: StreamingTexts, painters: ChatPainters) {
+private fun ChatRowContent(row: ChatRow, streamingText: StreamingTexts, painters: ChatPainters, onInterrupt: (() -> Unit)? = null) {
     when (row) {
         is UserTextRow -> Row(
             Modifier.fillMaxWidth().padding(top = 8.dp, bottom = 2.dp),
@@ -1127,29 +1133,48 @@ private fun ChatRowContent(row: ChatRow, streamingText: StreamingTexts, painters
                 }
             }
         }
-        is AssistantErrorRow -> Box(
-            Modifier
-                .fillMaxWidth()
-                .padding(start = 8.dp)
-                .clip(RoundedCornerShape(12.dp))
-                .background(MaterialTheme.colorScheme.errorContainer)
-                .padding(14.dp),
-        ) {
-            Row(verticalAlignment = Alignment.Top) {
-                Image(painters.alert, null, Modifier.size(22.dp))
-                Spacer(Modifier.width(10.dp))
-                Column {
+        is AssistantErrorRow -> {
+            if (row.errorName == "MessageAbortedError") {
+                Row(
+                    Modifier
+                        .fillMaxWidth()
+                        .padding(start = 8.dp, top = 2.dp, bottom = 2.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Image(painters.invalid, null, Modifier.size(14.dp))
+                    Spacer(Modifier.width(4.dp))
                     Text(
-                        "Error",
-                        style = MaterialTheme.typography.labelLarge,
-                        color = MaterialTheme.colorScheme.onErrorContainer,
+                        "Interrupted by user",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
-                    Spacer(Modifier.height(4.dp))
-                    Text(
-                        row.errorName,
-                        style = MaterialTheme.typography.bodyMedium,
-                        color = MaterialTheme.colorScheme.onErrorContainer,
-                    )
+                }
+            } else {
+                Box(
+                    Modifier
+                        .fillMaxWidth()
+                        .padding(start = 8.dp)
+                        .clip(RoundedCornerShape(12.dp))
+                        .background(MaterialTheme.colorScheme.errorContainer)
+                        .padding(14.dp),
+                ) {
+                    Row(verticalAlignment = Alignment.Top) {
+                        Image(painters.alert, null, Modifier.size(22.dp))
+                        Spacer(Modifier.width(10.dp))
+                        Column {
+                            Text(
+                                "Error",
+                                style = MaterialTheme.typography.labelLarge,
+                                color = MaterialTheme.colorScheme.onErrorContainer,
+                            )
+                            Spacer(Modifier.height(4.dp))
+                            Text(
+                                row.errorName,
+                                style = MaterialTheme.typography.bodyMedium,
+                                color = MaterialTheme.colorScheme.onErrorContainer,
+                            )
+                        }
+                    }
                 }
             }
         }
@@ -1179,7 +1204,7 @@ private fun ChatRowContent(row: ChatRow, streamingText: StreamingTexts, painters
                 }
             }
         }
-        IndicatorRow -> SendingIndicator()
+        IndicatorRow -> SendingIndicator(onInterrupt)
     }
 }
 

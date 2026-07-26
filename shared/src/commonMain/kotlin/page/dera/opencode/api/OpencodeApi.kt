@@ -172,6 +172,16 @@ class OpencodeApi(
         } catch (e: Exception) { Result.failure(e) }
     }
 
+    suspend fun interruptSession(sessionId: String): Result<Unit> {
+        return try {
+            val resp = client.post("$serverUrl/session/$sessionId/abort") {
+                authHeader()?.let { (k, v) -> header(k, v) }
+            }
+            if (resp.status.isSuccess()) Result.success(Unit)
+            else Result.failure(Exception("HTTP ${resp.status.value}"))
+        } catch (e: Exception) { Result.failure(e) }
+    }
+
     suspend fun updateSessionTitle(sessionId: String, title: String, directory: String): Result<Unit> {
         return try {
             val p = SessionUpdatePayload(title = title)
