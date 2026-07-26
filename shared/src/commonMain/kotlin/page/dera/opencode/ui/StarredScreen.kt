@@ -14,6 +14,7 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.ExperimentalMaterial3Api
@@ -24,6 +25,7 @@ import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -36,16 +38,32 @@ import opencodeapp.shared.generated.resources.Res
 import opencodeapp.shared.generated.resources.star
 import opencodeapp.shared.generated.resources.menuIcon
 import org.jetbrains.compose.resources.painterResource
+import page.dera.opencode.api.OpencodeApi
+import page.dera.opencode.api.SessionInfo
 import page.dera.opencode.settings.AppSettings
+import kotlin.time.Clock
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun StarredScreen(
     settings: AppSettings,
+    api: OpencodeApi,
     onBrowseFiles: () -> Unit,
     onOpenFolder: (path: String) -> Unit,
+    onOpenSession: (SessionInfo) -> Unit,
     onMenuClick: (() -> Unit)? = null,
 ) {
+    val latestSessionsLimit = settings.latestSessionsLimit
+    var latestSessions by remember { mutableStateOf<List<SessionInfo>>(emptyList()) }
+
+    LaunchedEffect(latestSessionsLimit) {
+        if (latestSessionsLimit > 0) {
+            api.listLatestSessions(latestSessionsLimit).onSuccess { latestSessions = it }
+        } else {
+            latestSessions = emptyList()
+        }
+    }
+
     Scaffold(
         topBar = {
             TopAppBar(
@@ -65,7 +83,10 @@ fun StarredScreen(
         },
     ) { padding ->
         val starred = settings.pinnedFolders
-        if (starred.isEmpty()) {
+        val hasLatest = latestSessionsLimit > 0 && latestSessions.isNotEmpty()
+        val hasStarred = starred.isNotEmpty()
+
+        if (!hasLatest && !hasStarred) {
             Box(
                 modifier = Modifier.fillMaxSize().padding(padding),
                 contentAlignment = Alignment.Center,
@@ -88,53 +109,101 @@ fun StarredScreen(
             LazyColumn(
                 modifier = Modifier.fillMaxSize().padding(padding),
             ) {
-                item(key = "starred_header") {
-                    Text(
-                        text = "Starred",
-                        style = MaterialTheme.typography.titleSmall,
-                        color = MaterialTheme.colorScheme.primary,
-                        modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 10.dp),
-                    )
-                }
-                items(starred, key = { it }) { path ->
-                    Card(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(horizontal = 16.dp, vertical = 4.dp)
-                            .clickable { onOpenFolder(path) },
-                        shape = androidx.compose.foundation.shape.RoundedCornerShape(12.dp),
-                        colors = CardDefaults.cardColors(
-                            containerColor = MaterialTheme.colorScheme.surfaceVariant,
-                        ),
-                    ) {
-                        Row(
-                            modifier = Modifier.fillMaxWidth().padding(16.dp),
-                            verticalAlignment = Alignment.CenterVertically,
+                if (hasLatest) {
+                    item(key = "latest_header") {
+                        Text(
+                            text = "Latest Sessions",
+                            style = MaterialTheme.typography.titleSmall,
+                            color = MaterialTheme.colorScheme.primary,
+                            modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 10.dp),
+                        )
+                    }
+                    items(latestSessions, key = { it.id }) { session ->
+                        Card(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(horizontal = 16.dp, vertical = 4.dp)
+                                .clickable { onOpenSession(session) },
+                            shape = RoundedCornerShape(12.dp),
+                            colors = CardDefaults.cardColors(
+                                containerColor = MaterialTheme.colorScheme.surfaceVariant,
+                            ),
                         ) {
-                            Image(
-                                painter = painterResource(Res.drawable.star),
-                                contentDescription = null,
-                                modifier = Modifier.size(20.dp),
-                            )
-                            Spacer(modifier = Modifier.width(12.dp))
-                            Column(modifier = Modifier.weight(1f)) {
-                                val parts = path.trimEnd('/').split('/')
-                                val name = parts.lastOrNull() ?: path
-                                val parent = parts.dropLast(1).takeLast(2).joinToString("/").ifEmpty { null }
-                                Text(
-                                    text = name,
-                                    style = MaterialTheme.typography.titleMedium,
-                                    maxLines = 1,
-                                    overflow = TextOverflow.Ellipsis,
-                                )
-                                if (parent != null) {
+                            Row(
+                                modifier = Modifier.fillMaxWidth().padding(16.dp),
+                                verticalAlignment = Alignment.CenterVertically,
+                            ) {
+                                Column(modifier = Modifier.weight(1f)) {
+                                    val dirName = session.location.directory.trimEnd('/').split('/').lastOrNull() ?: session.location.directory
                                     Text(
-                                        text = parent,
+                                        text = session.title.ifBlank { dirName },
+                                        style = MaterialTheme.typography.titleMedium,
+                                        maxLines = 1,
+                                        overflow = TextOverflow.Ellipsis,
+                                    )
+                                    val relativeTime = formatRelativeTime(session.time.updated)
+                                    Text(
+                                        text = "$dirName — $relativeTime",
                                         style = MaterialTheme.typography.bodySmall,
                                         color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f),
                                         maxLines = 1,
                                         overflow = TextOverflow.Ellipsis,
                                     )
+                                }
+                            }
+                        }
+                    }
+                }
+
+                if (hasStarred) {
+                    item(key = "starred_header") {
+                        Text(
+                            text = "Starred",
+                            style = MaterialTheme.typography.titleSmall,
+                            color = MaterialTheme.colorScheme.primary,
+                            modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 10.dp),
+                        )
+                    }
+                    items(starred, key = { it }) { path ->
+                        Card(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(horizontal = 16.dp, vertical = 4.dp)
+                                .clickable { onOpenFolder(path) },
+                            shape = RoundedCornerShape(12.dp),
+                            colors = CardDefaults.cardColors(
+                                containerColor = MaterialTheme.colorScheme.surfaceVariant,
+                            ),
+                        ) {
+                            Row(
+                                modifier = Modifier.fillMaxWidth().padding(16.dp),
+                                verticalAlignment = Alignment.CenterVertically,
+                            ) {
+                                Image(
+                                    painter = painterResource(Res.drawable.star),
+                                    contentDescription = null,
+                                    modifier = Modifier.size(20.dp),
+                                )
+                                Spacer(modifier = Modifier.width(12.dp))
+                                Column(modifier = Modifier.weight(1f)) {
+                                    val parts = path.trimEnd('/').split('/')
+                                    val name = parts.lastOrNull() ?: path
+                                    val parent = parts.dropLast(1).takeLast(2).joinToString("/").ifEmpty { null }
+                                    Text(
+                                        text = name,
+                                        style = MaterialTheme.typography.titleMedium,
+                                        maxLines = 1,
+                                        overflow = TextOverflow.Ellipsis,
+                                    )
+                                    if (parent != null) {
+                                        Text(
+                                            text = parent,
+                                            style = MaterialTheme.typography.bodySmall,
+                                            color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f),
+                                            maxLines = 1,
+                                            overflow = TextOverflow.Ellipsis,
+                                        )
+                                    }
                                 }
                             }
                         }
@@ -155,5 +224,24 @@ fun StarredScreen(
                 Text("Browse files")
             }
         }
+    }
+}
+
+private fun formatRelativeTime(createdEpoch: Long): String {
+    if (createdEpoch <= 0) return ""
+    val now = Clock.System.now().toEpochMilliseconds()
+    val diff = now - createdEpoch
+    val seconds = diff / 1000
+    val minutes = seconds / 60
+    val hours = minutes / 60
+    val days = hours / 24
+    return when {
+        minutes < 1 -> "just now"
+        minutes < 60 -> "${minutes}m ago"
+        hours < 24 -> "${hours}h ago"
+        days < 7 -> "${days}d ago"
+        days < 30 -> "${days / 7}w ago"
+        days < 365 -> "${days / 30}mo ago"
+        else -> "${days / 365}y ago"
     }
 }

@@ -45,6 +45,7 @@ import opencodeapp.shared.generated.resources.settingsIcon
 import opencodeapp.shared.generated.resources.xIcon
 import org.jetbrains.compose.resources.painterResource
 import page.dera.opencode.api.OpencodeApi
+import page.dera.opencode.api.SessionInfo
 import page.dera.opencode.api.ValidationResult
 import page.dera.opencode.api.WakatimeApi
 import page.dera.opencode.api.WakatimeHeartbeat
@@ -117,6 +118,13 @@ fun App() {
             tabs = tabs + Tab(id = id, screen = TabScreen.ProjectDetail(api, directory, name))
             activeTabId = id
         }
+    }
+
+    fun openSession(api: OpencodeApi, session: SessionInfo) {
+        val name = session.location.directory.trimEnd('/').split('/').last().ifEmpty { session.location.directory }
+        val id = "tab_${tabCounter++}"
+        tabs = tabs + Tab(id = id, screen = TabScreen.SessionDetail(api, session.location.directory, name, session))
+        activeTabId = id
     }
 
     MaterialTheme {
@@ -220,6 +228,7 @@ fun App() {
                         onCloseTabById = { id -> tabs = tabs.filter { t -> t.id != id } },
                         onOpenDrawer = { scope.launch { drawerState.open() } },
                         onOpenProject = { a, dir, name -> openProject(a, dir, name, activeTab.id) },
+                        onOpenSession = { a, s -> openSession(a, s) },
                         onSwitchTab = { activeTabId = it },
                     )
                 } else {
@@ -230,6 +239,7 @@ fun App() {
                         onNavigate = { landingScreen = it },
                         onOpenDrawer = { scope.launch { drawerState.open() } },
                         onOpenProject = { a, dir, name -> openProject(a, dir, name, null) },
+                        onOpenSession = { a, s -> openSession(a, s) },
                     )
                 }
             }
@@ -245,6 +255,7 @@ private fun LandingContent(
     onNavigate: (Screen) -> Unit,
     onOpenDrawer: () -> Unit,
     onOpenProject: (OpencodeApi, String, String) -> Unit,
+    onOpenSession: (OpencodeApi, SessionInfo) -> Unit,
 ) {
     when (screen) {
         is Screen.Loading -> {}
@@ -263,11 +274,13 @@ private fun LandingContent(
         is Screen.Starred -> {
             StarredScreen(
                 settings = settings,
+                api = screen.api,
                 onBrowseFiles = { onNavigate(Screen.Explorer(screen.api)) },
                 onOpenFolder = { path ->
                     val name = path.trimEnd('/').split('/').last().ifEmpty { path }
                     onOpenProject(screen.api, path, name)
                 },
+                onOpenSession = { session -> onOpenSession(screen.api, session) },
                 onMenuClick = onOpenDrawer,
             )
         }
@@ -309,17 +322,20 @@ private fun TabContent(
     onCloseTabById: (String) -> Unit,
     onOpenDrawer: () -> Unit,
     onOpenProject: (OpencodeApi, String, String) -> Unit,
+    onOpenSession: (OpencodeApi, SessionInfo) -> Unit,
     onSwitchTab: (String) -> Unit,
 ) {
     when (val ts = tab.screen) {
         is TabScreen.ProjectSelection -> {
             StarredScreen(
                 settings = settings,
+                api = ts.api,
                 onBrowseFiles = { onUpdateTab(tab.copy(screen = TabScreen.Explorer(ts.api))) },
                 onOpenFolder = { path ->
                     val name = path.trimEnd('/').split('/').last().ifEmpty { path }
                     onOpenProject(ts.api, path, name)
                 },
+                onOpenSession = { session -> onOpenSession(ts.api, session) },
                 onMenuClick = onOpenDrawer,
             )
         }

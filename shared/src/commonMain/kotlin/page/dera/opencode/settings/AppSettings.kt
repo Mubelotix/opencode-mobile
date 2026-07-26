@@ -36,6 +36,13 @@ class AppSettings {
     val isWakatimeConfigured: Boolean
         get() = !wakatimeApiKey.isNullOrBlank()
 
+    var latestSessionsLimit: Int
+        get() {
+            val raw = settings.getInt(KEY_LATEST_SESSIONS_LIMIT, DEFAULT_LATEST_SESSIONS_LIMIT)
+            return raw.coerceIn(0, 20)
+        }
+        set(value) { settings.putInt(KEY_LATEST_SESSIONS_LIMIT, value.coerceIn(0, 20)) }
+
     var pinnedFolders: List<String>
         get() {
             val raw = settings.getStringOrNull(KEY_PINNED_FOLDERS) ?: return emptyList()
@@ -66,6 +73,8 @@ class AppSettings {
         private const val KEY_SERVER_URL = "server_url"
         private const val KEY_SERVER_PASSWORD = "server_password"
         private const val KEY_PINNED_FOLDERS = "pinned_folders"
+        private const val KEY_LATEST_SESSIONS_LIMIT = "latest_sessions_limit"
+        private const val DEFAULT_LATEST_SESSIONS_LIMIT = 3
         private const val KEY_WAKATIME_API_URL = "wakatime_api_url"
         private const val KEY_WAKATIME_API_KEY = "wakatime_api_key"
     }

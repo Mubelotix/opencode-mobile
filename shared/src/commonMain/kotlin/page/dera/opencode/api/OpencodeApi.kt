@@ -61,6 +61,21 @@ class OpencodeApi(
         } catch (e: Exception) { Result.failure(e) }
     }
 
+    suspend fun listLatestSessions(limit: Int): Result<List<SessionInfo>> {
+        if (limit <= 0) return Result.success(emptyList())
+        return try {
+            val fetchLimit = (limit * 3).coerceAtMost(50)
+            val b = client.get("$serverUrl/api/session") {
+                authHeader()?.let { (k, v) -> header(k, v) }
+                url.parameters.append("limit", fetchLimit.toString())
+                url.parameters.append("order", "desc")
+            }.bodyAsText()
+            val all = json.decodeFromString<SessionsResponse>(b).data
+            val sorted = all.sortedByDescending { it.time.updated }.take(limit)
+            Result.success(sorted)
+        } catch (e: Exception) { Result.failure(e) }
+    }
+
     suspend fun getSession(sessionId: String, directory: String): Result<SessionInfo> {
         return try {
             val b = client.get("$serverUrl/api/session/$sessionId") {

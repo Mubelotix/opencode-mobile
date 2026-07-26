@@ -58,6 +58,7 @@ fun SettingsScreen(
     var wakatimeValidating by remember { mutableStateOf(false) }
     var wakatimeValidationMessage by remember { mutableStateOf<String?>(null) }
     var wakatimeValidationIsError by remember { mutableStateOf(false) }
+    var latestSessionsLimit by remember { mutableStateOf(settings.latestSessionsLimit.toString()) }
     val scope = rememberCoroutineScope()
 
     BackHandler { onBack() }
@@ -123,6 +124,32 @@ fun SettingsScreen(
             Spacer(Modifier.height(16.dp))
 
             HorizontalDivider()
+
+            Spacer(Modifier.height(16.dp))
+
+            HorizontalDivider()
+
+            Spacer(Modifier.height(16.dp))
+
+            Text(
+                text = "Display",
+                style = MaterialTheme.typography.titleMedium,
+            )
+
+            OutlinedTextField(
+                value = latestSessionsLimit,
+                onValueChange = { value ->
+                    val filtered = value.filter { it.isDigit() }
+                    latestSessionsLimit = filtered
+                    val num = filtered.toIntOrNull() ?: 0
+                    settings.latestSessionsLimit = num
+                },
+                label = { Text("Latest sessions count") },
+                singleLine = true,
+                supportingText = { Text("Set to 0 to hide. Max 20.") },
+                modifier = Modifier.fillMaxWidth(),
+                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+            )
 
             Spacer(Modifier.height(16.dp))
 
