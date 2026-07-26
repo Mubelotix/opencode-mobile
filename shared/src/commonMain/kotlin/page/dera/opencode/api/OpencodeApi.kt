@@ -210,6 +210,23 @@ class OpencodeApi(
         } catch (e: Exception) { Result.failure(e) }
     }
 
+    suspend fun compactSession(sessionId: String, providerID: String, modelID: String, directory: String): Result<Unit> {
+        return try {
+            val payload = SummarizePayload(providerID = providerID, modelID = modelID, auto = false)
+            val body = json.encodeToString(SummarizePayload.serializer(), payload)
+            println("OC_DBG: summarize POST /session/$sessionId/summarize body=$body")
+            val resp = client.post("$serverUrl/session/$sessionId/summarize") {
+                authHeader()?.let { (k, v) -> header(k, v) }
+                contentType(ContentType.Application.Json)
+                url.parameters.append("directory", directory)
+                setBody(body)
+            }
+            println("OC_DBG: summarize status=${resp.status}")
+            if (resp.status.isSuccess()) Result.success(Unit)
+            else Result.failure(Exception("HTTP ${resp.status.value}"))
+        } catch (e: Exception) { Result.failure(e) }
+    }
+
     suspend fun updateSessionTitle(sessionId: String, title: String, directory: String): Result<Unit> {
         return try {
             val p = SessionUpdatePayload(title = title)

@@ -279,6 +279,13 @@ data class QuestionReplyPayload(
 )
 
 @Serializable
+data class SummarizePayload(
+    val providerID: String,
+    val modelID: String,
+    val auto: Boolean = false,
+)
+
+@Serializable
 data class CommandInfo(
     val name: String,
     val template: String,
