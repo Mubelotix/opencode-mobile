@@ -265,6 +265,52 @@ fun SettingsScreen(
 
             HorizontalDivider()
 
+            Text(
+                text = "Port Scanner",
+                style = MaterialTheme.typography.titleMedium,
+            )
+
+            var portScannerEndpoint by remember { mutableStateOf(settings.portScannerEndpoint ?: "") }
+            var urlPattern by remember { mutableStateOf(settings.urlPattern) }
+            var portScannerSaved by remember { mutableStateOf(false) }
+
+            OutlinedTextField(
+                value = portScannerEndpoint,
+                onValueChange = { portScannerEndpoint = it; portScannerSaved = false },
+                label = { Text("Scanner Endpoint") },
+                placeholder = { Text("192.168.1.54:8765") },
+                singleLine = true,
+                modifier = Modifier.fillMaxWidth(),
+                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Uri),
+            )
+
+            OutlinedTextField(
+                value = urlPattern,
+                onValueChange = { urlPattern = it; portScannerSaved = false },
+                label = { Text("URL Pattern") },
+                placeholder = { Text("http://localhost:<port>") },
+                singleLine = true,
+                modifier = Modifier.fillMaxWidth(),
+                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Uri),
+                supportingText = { Text("Use <port> as placeholder for the port number") },
+            )
+
+            Button(
+                onClick = {
+                    settings.portScannerEndpoint = portScannerEndpoint.ifBlank { null }?.let { normalizeUrl(it) }
+                    settings.urlPattern = urlPattern.ifBlank { "http://localhost:<port>" }
+                    portScannerSaved = true
+                },
+                modifier = Modifier.fillMaxWidth().height(48.dp),
+                enabled = !portScannerSaved,
+            ) {
+                Text(if (portScannerSaved) "Saved" else "Save")
+            }
+
+            Spacer(Modifier.height(16.dp))
+
+            HorizontalDivider()
+
             Spacer(Modifier.height(16.dp))
 
             Text(
@@ -312,3 +358,6 @@ fun SettingsScreen(
         )
     }
 }
+
+private fun normalizeUrl(raw: String): String =
+    raw.trim().let { if (it.contains("://")) it.trimEnd('/') else "http://${it.trimEnd('/')}" }
