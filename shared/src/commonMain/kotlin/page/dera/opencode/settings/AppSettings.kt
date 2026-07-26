@@ -65,6 +65,17 @@ class AppSettings {
         get() = settings.getBoolean(KEY_EXPAND_DIFFS_BY_DEFAULT, true)
         set(value) { settings.putBoolean(KEY_EXPAND_DIFFS_BY_DEFAULT, value) }
 
+    var portScannerEndpoint: String?
+        get() = settings.getStringOrNull(KEY_PORT_SCANNER_ENDPOINT)
+        set(value) {
+            if (value != null) settings.putString(KEY_PORT_SCANNER_ENDPOINT, value)
+            else settings.remove(KEY_PORT_SCANNER_ENDPOINT)
+        }
+
+    var urlPattern: String
+        get() = settings.getString(KEY_URL_PATTERN, DEFAULT_URL_PATTERN)
+        set(value) { settings.putString(KEY_URL_PATTERN, value) }
+
     val isConfigured: Boolean
         get() = !serverUrl.isNullOrBlank()
 
@@ -82,5 +93,8 @@ class AppSettings {
         private const val KEY_WAKATIME_API_URL = "wakatime_api_url"
         private const val KEY_WAKATIME_API_KEY = "wakatime_api_key"
         private const val KEY_EXPAND_DIFFS_BY_DEFAULT = "expand_diffs_by_default"
+        private const val KEY_PORT_SCANNER_ENDPOINT = "port_scanner_endpoint"
+        private const val KEY_URL_PATTERN = "url_pattern"
+        private const val DEFAULT_URL_PATTERN = "http://localhost:<port>"
     }
 }
