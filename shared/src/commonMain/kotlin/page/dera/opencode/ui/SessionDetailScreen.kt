@@ -1,5 +1,9 @@
 package page.dera.opencode.ui
 
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.animateContentSize
+import androidx.compose.animation.expandVertically
+import androidx.compose.animation.shrinkVertically
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
@@ -986,7 +990,11 @@ private fun SendingIndicator(onInterrupt: (() -> Unit)? = null) {
             Spacer(Modifier.width(4.dp))
             Text(headerText, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
         }
-        if (expanded && t.isNotBlank()) {
+        AnimatedVisibility(
+            visible = expanded && t.isNotBlank(),
+            enter = expandVertically(),
+            exit = shrinkVertically(),
+        ) {
             Box(Modifier.fillMaxWidth().padding(vertical = 2.dp).clip(RoundedCornerShape(8.dp))
                 .background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = .5f)).padding(8.dp)) {
                 Text(truncateForDisplay(t), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
@@ -1509,22 +1517,28 @@ private fun ToolPart(row: AssistantPartRow, painters: ChatPainters) {
                         )
                     }
                 }
-                if (output != null && outputMode != BashOutputMode.COLLAPSED) {
-                    Spacer(Modifier.height(4.dp))
-                    val displayedOutput = when (outputMode) {
-                        BashOutputMode.LAST_5 -> {
-                            val lines = output.lines()
-                            if (lines.size > 5) "… (${lines.size - 5} more lines above)\n" + lines.takeLast(5).joinToString("\n") else output
+                AnimatedVisibility(
+                    visible = output != null && outputMode != BashOutputMode.COLLAPSED,
+                    enter = expandVertically(),
+                    exit = shrinkVertically(),
+                ) {
+                    Column(Modifier.animateContentSize()) {
+                        Spacer(Modifier.height(4.dp))
+                        val displayedOutput = when (outputMode) {
+                            BashOutputMode.LAST_5 -> {
+                                val lines = output!!.lines()
+                                if (lines.size > 5) "… (${lines.size - 5} more lines above)\n" + lines.takeLast(5).joinToString("\n") else output!!
+                            }
+                            BashOutputMode.FULL -> output!!
+                            else -> ""
                         }
-                        BashOutputMode.FULL -> output
-                        else -> ""
+                        Text(
+                            displayedOutput,
+                            style = MaterialTheme.typography.bodySmall,
+                            fontFamily = FontFamily.Monospace,
+                            color = Color(0xFFA6ADC8),
+                        )
                     }
-                    Text(
-                        displayedOutput,
-                        style = MaterialTheme.typography.bodySmall,
-                        fontFamily = FontFamily.Monospace,
-                        color = Color(0xFFA6ADC8),
-                    )
                 }
             }
         }
@@ -1580,7 +1594,11 @@ private fun ToolPart(row: AssistantPartRow, painters: ChatPainters) {
                     softWrap = false,
                 )
             }
-            if (expanded && isExpandable) {
+            AnimatedVisibility(
+                visible = expanded && isExpandable,
+                enter = expandVertically(),
+                exit = shrinkVertically(),
+            ) {
                 Box(
                     Modifier
                         .fillMaxWidth()
