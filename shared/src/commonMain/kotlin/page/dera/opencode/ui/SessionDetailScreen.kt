@@ -114,6 +114,7 @@ import com.russhwolf.settings.set
 import kotlinx.serialization.builtins.ListSerializer
 import opencodeapp.shared.generated.resources.globeIcon
 import opencodeapp.shared.generated.resources.folderIcon
+import opencodeapp.shared.generated.resources.scissorsIcon
 import opencodeapp.shared.generated.resources.searchIcon
 import opencodeapp.shared.generated.resources.sendIcon
 import opencodeapp.shared.generated.resources.infoIcon
@@ -186,6 +187,9 @@ private data object IndicatorRow : ChatRow {
     override val key get() = "sending_indicator"
     override val contentType get() = "indicator"
 }
+private data class CompactionRow(override val key: String) : ChatRow {
+    override val contentType get() = "compaction_indicator"
+}
 
 // The default prefetch strategy composes only 1 item ahead, which a fling
 // outruns instantly with rows this small; when several rows then enter the
@@ -246,6 +250,7 @@ private data class ChatPainters(
     val brain: Painter,
     val alert: Painter,
     val listChecks: Painter,
+    val scissors: Painter,
 )
 
 // Newest row first, because the list uses reverseLayout.
@@ -254,10 +259,25 @@ private fun buildRows(messages: List<LegacyWithParts>, showIndicator: Boolean, p
     for (msg in messages) {
         val parts = msg.parts.filter { it.type !in hiddenPartTypes }
         when (msg.info.role) {
-            "user" -> rows.add(UserTextRow(
-                "u:${msg.info.id}",
-                parts.filter { it.type == "text" }.joinToString("\n") { it.text ?: "" }.ifEmpty { "Sent a message" },
-            ))
+            "user" -> {
+                val textParts = parts.filter { it.type == "text" }
+                val text = textParts.joinToString("\n") { it.text ?: "" }
+                val label = when {
+                    text.isNotBlank() -> text
+                    parts.any { it.type == "compaction" } -> "/compact"
+                    parts.any { it.type == "subtask" } -> {
+                        val cmd = parts.first { it.type == "subtask" }.command
+                        if (!cmd.isNullOrBlank()) "/$cmd" else "Launched agent"
+                    }
+                    parts.any { it.type == "command" } -> parts.first { it.type == "command" }.command?.let { "/$it" } ?: "Sent a message"
+                    parts.isEmpty() -> "Sending..."
+                    else -> "Sent a message"
+                }
+                rows.add(UserTextRow("u:${msg.info.id}", label))
+                if (parts.any { it.type == "compaction" }) {
+                    rows.add(CompactionRow("compaction:${msg.info.id}"))
+                }
+            }
             "assistant" -> {
                 if (msg.info.error != null) rows.add(AssistantErrorRow("e:${msg.info.id}", msg.info.error!!.name))
                 parts.forEach { p ->
@@ -374,6 +394,7 @@ fun SessionDetailScreen(api: OpencodeApi, sessionId: String, sessionTitle: Strin
         brain = painterResource(brainIcon),
         alert = painterResource(Res.drawable.triangle_alert),
         listChecks = painterResource(listChecksIcon),
+        scissors = painterResource(scissorsIcon),
     )
 
     // reverseLayout keeps the viewport pinned to the bottom while the newest row
@@ -543,6 +564,16 @@ fun SessionDetailScreen(api: OpencodeApi, sessionId: String, sessionTitle: Strin
                                 messages.add(LegacyWithParts(
                                     LegacyInfo(id = rawId, sessionID = sessionId, role = "system"),
                                     listOf(LegacyPart(id = rawId, sessionID = sessionId, messageID = rawId, type = "text", text = "[${event.payload?.type ?: "unknown"}] $display"))
+                                ))
+                            }
+                        }
+                        "session.compacted" -> {
+                            val rawId = "evt_session.compacted_${kotlin.random.Random.nextLong().toString(36)}"
+                            println("OC_DBG: session.compacted $sid")
+                            if (messages.none { it.info.id == rawId }) {
+                                messages.add(LegacyWithParts(
+                                    LegacyInfo(id = rawId, sessionID = sessionId, role = "assistant"),
+                                    listOf(LegacyPart(id = rawId, sessionID = sessionId, messageID = rawId, type = "compaction"))
                                 ))
                             }
                         }
@@ -724,22 +755,40 @@ fun SessionDetailScreen(api: OpencodeApi, sessionId: String, sessionTitle: Strin
                             val spaceIndex = t.indexOf(' ')
                             val commandName = if (spaceIndex > 0) t.substring(1, spaceIndex) else t.substring(1)
                             val args = if (spaceIndex > 0) t.substring(spaceIndex + 1) else ""
-                            val cmd = commands.find { it.name == commandName }
-                            if (cmd == null) {
-                                errorText = "Unknown command: /$commandName"
-                            } else {
+                            if (commandName == "compact") {
                                 inputText = ""
-                                isSending = true
-                                errorText = null
-                                scope.launch {
-                                    println("OC_DBG: sendCommand $commandName args=$args")
-                                    api.sendCommand(sessionId, commandName, args, directory).onFailure { e ->
-                                        println("OC_DBG: sendCommand fail ${e.message}")
-                                        errorText = e.message ?: "Failed to send command"
+                                if (sessionModel == null) {
+                                    errorText = "No model configured"
+                                } else {
+                                    isSending = true
+                                    errorText = null
+                                    scope.launch {
+                                        println("OC_DBG: summarize session")
+                                        api.compactSession(sessionId, sessionModel!!.providerID, sessionModel!!.id, directory).onFailure { e ->
+                                            println("OC_DBG: summarize fail ${e.message}")
+                                            errorText = e.message ?: "Failed to compact"
+                                        }
                                         isSending = false
-                                    }.onSuccess {
-                                        println("OC_DBG: sendCommand ok")
-                                        isSending = false
+                                    }
+                                }
+                            } else {
+                                val cmd = commands.find { it.name == commandName }
+                                if (cmd == null) {
+                                    errorText = "Unknown command: /$commandName"
+                                } else {
+                                    inputText = ""
+                                    isSending = true
+                                    errorText = null
+                                    scope.launch {
+                                        println("OC_DBG: sendCommand $commandName args=$args")
+                                        api.sendCommand(sessionId, commandName, args, directory).onFailure { e ->
+                                            println("OC_DBG: sendCommand fail ${e.message}")
+                                            errorText = e.message ?: "Failed to send command"
+                                            isSending = false
+                                        }.onSuccess {
+                                            println("OC_DBG: sendCommand ok")
+                                            isSending = false
+                                        }
                                     }
                                 }
                             }
@@ -783,10 +832,15 @@ fun SessionDetailScreen(api: OpencodeApi, sessionId: String, sessionTitle: Strin
                 }
                 val showCommands = inputText.startsWith("/") && !inputText.contains(" ")
                 val commandFilterText = if (showCommands && inputText.length > 1) inputText.removePrefix("/").lowercase() else ""
+                val compactVirtualCmd = CommandInfo(name = "compact", template = "/compact", description = "Compact session context")
                 val filteredCommands = remember(inputText, commands) {
                     if (!showCommands) emptyList()
-                    else if (commandFilterText.isEmpty()) commands
-                    else commands.filter { it.name.lowercase().startsWith(commandFilterText) }
+                    else {
+                        val matches = commands.filter { it.name.lowercase().contains(commandFilterText) }
+                        val includeCompact = commandFilterText.isEmpty() || "compact".contains(commandFilterText)
+                        if (includeCompact) listOf(compactVirtualCmd) + matches
+                        else matches
+                    }
                 }
                 if (filteredCommands.isNotEmpty()) {
                     Box(
@@ -1274,6 +1328,18 @@ private fun ChatRowContent(row: ChatRow, streamingText: StreamingTexts, painters
             }
         }
         IndicatorRow -> SendingIndicator(onInterrupt)
+        is CompactionRow -> Row(
+            Modifier.fillMaxWidth().padding(start = 8.dp).padding(vertical = 2.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Image(painters.scissors, null, Modifier.size(14.dp))
+            Spacer(Modifier.width(4.dp))
+            Text(
+                "Compacted context",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        }
     }
 }
 
@@ -1298,15 +1364,19 @@ private fun PartContent(row: AssistantPartRow, streamingText: StreamingTexts, pa
         }
         "reasoning" -> ReasoningPart(part, streamingText, painters)
         "tool" -> ToolPart(row, painters)
-        "compaction" -> Box(
-            Modifier.fillMaxWidth(),
-            contentAlignment = Alignment.Center,
+        "compaction" -> Row(
+            Modifier.padding(vertical = 2.dp)
+                .clip(RoundedCornerShape(8.dp))
+                .background(MaterialTheme.colorScheme.surfaceVariant)
+                .padding(10.dp),
+            verticalAlignment = Alignment.CenterVertically,
         ) {
+            Image(painters.scissors, null, Modifier.size(14.dp))
+            Spacer(Modifier.width(8.dp))
             Text(
-                "Context compacted",
-                style = MaterialTheme.typography.labelSmall,
-                color = MaterialTheme.colorScheme.outline,
-                modifier = Modifier.padding(vertical = 4.dp),
+                "Compacted context",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
         }
         "agent" -> AgentPart(part, painters)
