@@ -301,7 +301,6 @@ private fun LandingContent(
                 settings = settings,
                 wakatimeApi = wakatimeApi,
                 onDisconnect = {
-                    settings.clear()
                     onNavigate(Screen.Welcome(screen.api))
                 },
                 onBack = { onNavigate(Screen.Starred(screen.api)) },

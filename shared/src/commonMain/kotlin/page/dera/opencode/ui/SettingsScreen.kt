@@ -11,6 +11,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.ExperimentalMaterial3Api
@@ -60,6 +61,7 @@ fun SettingsScreen(
     var wakatimeValidationMessage by remember { mutableStateOf<String?>(null) }
     var wakatimeValidationIsError by remember { mutableStateOf(false) }
     var latestSessionsLimit by remember { mutableStateOf(settings.latestSessionsLimit.toString()) }
+    var showDisconnectDialog by remember { mutableStateOf(false) }
     val scope = rememberCoroutineScope()
 
     BackHandler { onBack() }
@@ -273,8 +275,7 @@ fun SettingsScreen(
 
             Button(
                 onClick = {
-                    settings.clear()
-                    onDisconnect()
+                    showDisconnectDialog = true
                 },
                 modifier = Modifier.fillMaxWidth().height(48.dp),
                 colors = ButtonDefaults.buttonColors(
@@ -285,5 +286,29 @@ fun SettingsScreen(
                 Text("Disconnect")
             }
         }
+    }
+
+    if (showDisconnectDialog) {
+        AlertDialog(
+            onDismissRequest = { showDisconnectDialog = false },
+            title = { Text("Disconnect") },
+            text = { Text("Are you sure you want to disconnect? This will clear your server URL and password.") },
+            confirmButton = {
+                TextButton(
+                    onClick = {
+                        showDisconnectDialog = false
+                        settings.clear()
+                        onDisconnect()
+                    },
+                ) {
+                    Text("Disconnect", color = MaterialTheme.colorScheme.error)
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { showDisconnectDialog = false }) {
+                    Text("Cancel")
+                }
+            },
+        )
     }
 }
