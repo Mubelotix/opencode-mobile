@@ -611,13 +611,7 @@ fun SessionDetailScreen(api: OpencodeApi, sessionId: String, sessionTitle: Strin
                                 modifier = Modifier.clickable { isEditingTitle = true },
                             )
                         }
-                        val subtitles = mutableListOf<String>()
-                        val totalTokens = (sessionTokens?.input ?: 0) + (sessionTokens?.output ?: 0) + (sessionTokens?.reasoning ?: 0) + (sessionTokens?.cache?.read ?: 0) + (sessionTokens?.cache?.write ?: 0)
-                        if (totalTokens > 0) subtitles.add(formatTokenCount(totalTokens))
-                        sessionCost?.let { subtitles.add(formatCost(it)) }
-                        if (subtitles.isNotEmpty()) {
-                            Text(subtitles.joinToString("  ·  "), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 1)
-                        }
+
                     }
                 },
                 navigationIcon = {
