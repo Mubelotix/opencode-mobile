@@ -58,7 +58,7 @@ fun StarredScreen(
 
     LaunchedEffect(latestSessionsLimit) {
         if (latestSessionsLimit > 0) {
-            api.listLatestSessions(latestSessionsLimit).onSuccess { latestSessions = it }
+            api.listLatestSessions(latestSessionsLimit).onSuccess { latestSessions = it.filter { s -> s.parentID == null }.take(latestSessionsLimit) }
         } else {
             latestSessions = emptyList()
         }

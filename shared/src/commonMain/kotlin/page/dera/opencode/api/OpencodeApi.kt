@@ -71,7 +71,7 @@ class OpencodeApi(
                 url.parameters.append("order", "desc")
             }.bodyAsText()
             val all = json.decodeFromString<SessionsResponse>(b).data
-            val sorted = all.sortedByDescending { it.time.updated }.take(limit)
+            val sorted = all.sortedByDescending { it.time.updated }
             Result.success(sorted)
         } catch (e: Exception) { Result.failure(e) }
     }
