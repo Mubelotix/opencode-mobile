@@ -277,3 +277,25 @@ data class QuestionToolRef(
 data class QuestionReplyPayload(
     val answers: List<List<String>>,
 )
+
+@Serializable
+data class CommandInfo(
+    val name: String,
+    val template: String,
+    val description: String? = null,
+    val agent: String? = null,
+    val model: CommandModelRef? = null,
+    val subtask: Boolean? = null,
+)
+
+@Serializable
+data class CommandModelRef(
+    val providerID: String = "",
+    val modelID: String = "",
+)
+
+@Serializable
+data class CommandPayload(
+    val command: String,
+    val arguments: String,
+)

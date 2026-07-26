@@ -83,6 +83,7 @@ import kotlin.time.Clock
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
+import page.dera.opencode.api.CommandInfo
 import page.dera.opencode.api.LegacyInfo
 import page.dera.opencode.api.LegacyPart
 import page.dera.opencode.api.LegacyToolState
@@ -298,6 +299,7 @@ fun SessionDetailScreen(api: OpencodeApi, sessionId: String, sessionTitle: Strin
     var sessionCost by remember { mutableStateOf<Double?>(null) }
     var sessionModel by remember { mutableStateOf<SessionModel?>(null) }
     var providers by remember { mutableStateOf<List<ProviderInfo>>(emptyList()) }
+    var commands by remember { mutableStateOf<List<CommandInfo>>(emptyList()) }
     var currentTitle by remember { mutableStateOf(sessionTitle) }
     var isEditingTitle by remember { mutableStateOf(false) }
     var editTitleText by remember { mutableStateOf(currentTitle) }
@@ -350,6 +352,7 @@ fun SessionDetailScreen(api: OpencodeApi, sessionId: String, sessionTitle: Strin
             currentTitle = info.title.ifEmpty { currentTitle }
         }
         api.listProviders(directory).onSuccess { providers = it }
+        api.listCommands(directory).onSuccess { commands = it }
     }
 
     LaunchedEffect(sessionId, directory) {
@@ -717,18 +720,43 @@ fun SessionDetailScreen(api: OpencodeApi, sessionId: String, sessionTitle: Strin
                 val doSend = {
                     if (inputText.isNotBlank()) {
                         val t = inputText.trim()
-                        inputText = ""
-                        isSending = true
-                        errorText = null
-                        scope.launch {
-                            println("OC_DBG: send")
-                            if (api.sendPrompt(sessionId, t).isSuccess) {
-                                println("OC_DBG: send ok")
+                        if (t.startsWith("/")) {
+                            val spaceIndex = t.indexOf(' ')
+                            val commandName = if (spaceIndex > 0) t.substring(1, spaceIndex) else t.substring(1)
+                            val args = if (spaceIndex > 0) t.substring(spaceIndex + 1) else ""
+                            val cmd = commands.find { it.name == commandName }
+                            if (cmd == null) {
+                                errorText = "Unknown command: /$commandName"
                             } else {
-                                println("OC_DBG: send fail")
-                                errorText = "Failed to send"
+                                inputText = ""
+                                isSending = true
+                                errorText = null
+                                scope.launch {
+                                    println("OC_DBG: sendCommand $commandName args=$args")
+                                    api.sendCommand(sessionId, commandName, args, directory).onFailure { e ->
+                                        println("OC_DBG: sendCommand fail ${e.message}")
+                                        errorText = e.message ?: "Failed to send command"
+                                        isSending = false
+                                    }.onSuccess {
+                                        println("OC_DBG: sendCommand ok")
+                                        isSending = false
+                                    }
+                                }
                             }
-                            isSending = false
+                        } else {
+                            inputText = ""
+                            isSending = true
+                            errorText = null
+                            scope.launch {
+                                println("OC_DBG: send")
+                                if (api.sendPrompt(sessionId, t).isSuccess) {
+                                    println("OC_DBG: send ok")
+                                } else {
+                                    println("OC_DBG: send fail")
+                                    errorText = "Failed to send"
+                                }
+                                isSending = false
+                            }
                         }
                     }
                 }
@@ -750,6 +778,50 @@ fun SessionDetailScreen(api: OpencodeApi, sessionId: String, sessionTitle: Strin
                             }
                         }) {
                             Text("Send ${reviewComments.size} comment${if (reviewComments.size > 1) "s" else ""}")
+                        }
+                    }
+                }
+                val showCommands = inputText.startsWith("/") && !inputText.contains(" ")
+                val commandFilterText = if (showCommands && inputText.length > 1) inputText.removePrefix("/").lowercase() else ""
+                val filteredCommands = remember(inputText, commands) {
+                    if (!showCommands) emptyList()
+                    else if (commandFilterText.isEmpty()) commands
+                    else commands.filter { it.name.lowercase().startsWith(commandFilterText) }
+                }
+                if (filteredCommands.isNotEmpty()) {
+                    Box(
+                        Modifier.fillMaxWidth().padding(horizontal = 12.dp).zIndex(2f)
+                            .clip(RoundedCornerShape(topStart = 12.dp, topEnd = 12.dp))
+                            .background(MaterialTheme.colorScheme.surfaceVariant)
+                            .padding(4.dp),
+                    ) {
+                        Column(Modifier.verticalScroll(rememberScrollState()).heightIn(max = 240.dp)) {
+                            filteredCommands.take(12).forEach { cmd ->
+                                Row(
+                                    Modifier.fillMaxWidth()
+                                        .clip(RoundedCornerShape(8.dp))
+                                        .clickable { inputText = "/${cmd.name} " }
+                                        .padding(horizontal = 12.dp, vertical = 10.dp),
+                                    verticalAlignment = Alignment.CenterVertically,
+                                ) {
+                                    Text(
+                                        "/${cmd.name}",
+                                        style = MaterialTheme.typography.bodyMedium,
+                                        fontFamily = FontFamily.Monospace,
+                                        color = MaterialTheme.colorScheme.primary,
+                                    )
+                                    if (cmd.description != null) {
+                                        Spacer(Modifier.width(12.dp))
+                                        Text(
+                                            cmd.description!!,
+                                            style = MaterialTheme.typography.bodySmall,
+                                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                            maxLines = 1,
+                                            overflow = TextOverflow.Ellipsis,
+                                        )
+                                    }
+                                }
+                            }
                         }
                     }
                 }

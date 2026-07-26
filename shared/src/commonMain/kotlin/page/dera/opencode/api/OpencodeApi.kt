@@ -172,6 +172,34 @@ class OpencodeApi(
         } catch (e: Exception) { Result.failure(e) }
     }
 
+    suspend fun listCommands(directory: String): Result<List<CommandInfo>> {
+        return try {
+            val b = client.get("$serverUrl/command") {
+                authHeader()?.let { (k, v) -> header(k, v) }
+                url.parameters.append("directory", directory)
+            }.bodyAsText()
+            Result.success(json.decodeFromString<List<CommandInfo>>(b))
+        } catch (e: Exception) { Result.failure(e) }
+    }
+
+    suspend fun sendCommand(sessionId: String, command: String, arguments: String, directory: String): Result<Unit> {
+        return try {
+            val p = CommandPayload(command = command, arguments = arguments)
+            val body = json.encodeToString(CommandPayload.serializer(), p)
+            println("OC_DBG: sendCommand POST /session/$sessionId/command body=$body")
+            val resp = client.post("$serverUrl/session/$sessionId/command") {
+                authHeader()?.let { (k, v) -> header(k, v) }; contentType(ContentType.Application.Json)
+                setBody(body)
+            }
+            println("OC_DBG: sendCommand status=${resp.status} command=$command")
+            if (resp.status.isSuccess()) Result.success(Unit) else {
+                val respBody = try { resp.bodyAsText() } catch (_: Exception) { "n/a" }
+                println("OC_DBG: sendCommand fail body=$respBody")
+                Result.failure(Exception("Server returned ${resp.status.value}"))
+            }
+        } catch (e: Exception) { Result.failure(e) }
+    }
+
     suspend fun interruptSession(sessionId: String): Result<Unit> {
         return try {
             val resp = client.post("$serverUrl/session/$sessionId/abort") {
