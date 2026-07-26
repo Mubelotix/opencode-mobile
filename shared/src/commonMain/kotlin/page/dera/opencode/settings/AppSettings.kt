@@ -61,6 +61,10 @@ class AppSettings {
 
     fun isPinned(path: String): Boolean = pinnedFolders.contains(path)
 
+    var expandDiffsByDefault: Boolean
+        get() = settings.getBoolean(KEY_EXPAND_DIFFS_BY_DEFAULT, true)
+        set(value) { settings.putBoolean(KEY_EXPAND_DIFFS_BY_DEFAULT, value) }
+
     val isConfigured: Boolean
         get() = !serverUrl.isNullOrBlank()
 
@@ -77,5 +81,6 @@ class AppSettings {
         private const val DEFAULT_LATEST_SESSIONS_LIMIT = 3
         private const val KEY_WAKATIME_API_URL = "wakatime_api_url"
         private const val KEY_WAKATIME_API_KEY = "wakatime_api_key"
+        private const val KEY_EXPAND_DIFFS_BY_DEFAULT = "expand_diffs_by_default"
     }
 }

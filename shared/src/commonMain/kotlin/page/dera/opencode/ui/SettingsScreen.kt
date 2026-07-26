@@ -18,6 +18,7 @@ import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
+import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
@@ -150,6 +151,33 @@ fun SettingsScreen(
                 modifier = Modifier.fillMaxWidth(),
                 keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
             )
+
+            Spacer(Modifier.height(16.dp))
+
+            var expandDiffs by remember { mutableStateOf(settings.expandDiffsByDefault) }
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                verticalAlignment = androidx.compose.ui.Alignment.CenterVertically,
+            ) {
+                Column(Modifier.weight(1f)) {
+                    Text(
+                        "Expand diffs by default",
+                        style = MaterialTheme.typography.bodyMedium,
+                    )
+                    Text(
+                        "Always show diff blocks expanded in edit tool calls",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.outline,
+                    )
+                }
+                Switch(
+                    checked = expandDiffs,
+                    onCheckedChange = {
+                        expandDiffs = it
+                        settings.expandDiffsByDefault = it
+                    },
+                )
+            }
 
             Spacer(Modifier.height(16.dp))
 

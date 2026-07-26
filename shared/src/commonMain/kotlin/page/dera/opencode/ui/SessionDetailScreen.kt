@@ -130,6 +130,7 @@ import opencodeapp.shared.generated.resources.terminal
 import opencodeapp.shared.generated.resources.triangle_alert
 import opencodeapp.shared.generated.resources.listChecksIcon
 import opencodeapp.shared.generated.resources.clipboardListIcon
+import opencodeapp.shared.generated.resources.filePenIcon
 import opencodeapp.shared.generated.resources.menuIcon
 import opencodeapp.shared.generated.resources.messageSquareIcon
 import opencodeapp.shared.generated.resources.terminalIcon
@@ -235,6 +236,7 @@ private data class ChatPainters(
     val bot: Painter,
     val folder: Painter,
     val file: Painter,
+    val filePen: Painter,
     val search: Painter,
     val question: Painter,
     val globe: Painter,
@@ -360,6 +362,7 @@ fun SessionDetailScreen(api: OpencodeApi, sessionId: String, sessionTitle: Strin
         bot = painterResource(botIcon),
         folder = painterResource(Res.drawable.folder),
         file = painterResource(Res.drawable.file),
+        filePen = painterResource(filePenIcon),
         search = painterResource(searchIcon),
         question = painterResource(circleQuestionMarkIcon),
         globe = painterResource(globeIcon),
@@ -1343,10 +1346,12 @@ private fun ToolPart(row: AssistantPartRow, painters: ChatPainters) {
             }
         }
     } else {
-        var expanded by remember { mutableStateOf(false) }
+        val expandDiffsSetting = remember { Settings().getBoolean("expand_diffs_by_default", true) }
+        var expanded by remember { mutableStateOf(part.tool == "edit" && expandDiffsSetting) }
         val isExpandable = part.tool in setOf("websearch", "webfetch", "question", "invalid", "read", "write", "edit", "todowrite")
         val icon = when {
             part.tool == "invalid" -> painters.invalid
+            part.tool == "edit" -> painters.filePen
             part.tool == "read" && row.isDirectory -> painters.folder
             part.tool in listOf("glob", "grep") -> painters.search
             part.tool == "question" -> painters.question
@@ -1403,23 +1408,74 @@ private fun ToolPart(row: AssistantPartRow, painters: ChatPainters) {
                         .padding(8.dp),
                 ) {
                     Column {
-                        val inputPretty = remember(part) {
-                            val inputObj = when (val s = part.state) {
-                                is LegacyToolState.Pending -> s.input
-                                is LegacyToolState.Running -> s.input
-                                is LegacyToolState.Completed -> s.input
-                                is LegacyToolState.Error -> s.input
-                                null -> null
+                        if (part.tool == "edit") {
+                            val inputObj = remember(part) {
+                                when (val s = part.state) {
+                                    is LegacyToolState.Pending -> s.input
+                                    is LegacyToolState.Running -> s.input
+                                    is LegacyToolState.Completed -> s.input
+                                    is LegacyToolState.Error -> s.input
+                                    null -> null
+                                }
                             }
-                            inputObj?.let { truncateForDisplay(prettyJson.encodeToString(JsonElement.serializer(), it)) }
-                        }
-                        if (inputPretty != null) {
-                            Text(
-                                inputPretty,
-                                style = MaterialTheme.typography.bodySmall,
-                                fontFamily = FontFamily.Monospace,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                            )
+                            val obj = inputObj?.jsonObject
+                            val old = obj?.get("oldString")?.jsonPrimitive?.content ?: ""
+                            val new = obj?.get("newString")?.jsonPrimitive?.content ?: ""
+                            val diffLines = remember(old, new) { if (old.isNotEmpty() || new.isNotEmpty()) computeEditDiff(old, new) else emptyList() }
+                            if (diffLines.isNotEmpty()) {
+                                val monoStyle = MaterialTheme.typography.bodySmall.copy(fontFamily = FontFamily.Monospace)
+                                diffLines.forEach { line ->
+                                        val bg = when {
+                                            line.isAddition -> EditAddBg
+                                            line.isDeletion -> EditDelBg
+                                            else -> Color.Transparent
+                                        }
+                                        val fg = when {
+                                            line.isAddition -> EditAddFg
+                                            line.isDeletion -> EditDelFg
+                                            else -> Color.Transparent
+                                        }
+                                        val prefix = when {
+                                            line.isAddition -> "+"
+                                            line.isDeletion -> "-"
+                                            else -> " "
+                                        }
+                                        Row(
+                                            Modifier.fillMaxWidth().background(bg).padding(horizontal = 4.dp, vertical = 1.dp),
+                                            verticalAlignment = Alignment.CenterVertically,
+                                        ) {
+                                            Text(
+                                                prefix,
+                                                style = monoStyle,
+                                                color = fg,
+                                            )
+                                            Text(
+                                                line.content,
+                                                style = monoStyle,
+                                                color = if (fg == Color.Transparent) MaterialTheme.colorScheme.onSurfaceVariant else fg,
+                                            )
+                                        }
+                                    }
+                                }
+                        } else {
+                            val inputPretty = remember(part) {
+                                val inputObj = when (val s = part.state) {
+                                    is LegacyToolState.Pending -> s.input
+                                    is LegacyToolState.Running -> s.input
+                                    is LegacyToolState.Completed -> s.input
+                                    is LegacyToolState.Error -> s.input
+                                    null -> null
+                                }
+                                inputObj?.let { truncateForDisplay(prettyJson.encodeToString(JsonElement.serializer(), it)) }
+                            }
+                            if (inputPretty != null) {
+                                Text(
+                                    inputPretty,
+                                    style = MaterialTheme.typography.bodySmall,
+                                    fontFamily = FontFamily.Monospace,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                )
+                            }
                         }
                         val output = remember(part) {
                             when (val s = part.state) {
@@ -1428,7 +1484,7 @@ private fun ToolPart(row: AssistantPartRow, painters: ChatPainters) {
                                 else -> null
                             }?.let { truncateForDisplay(it) }
                         }
-                        if (output != null) {
+                        if (output != null && part.tool != "edit") {
                             Spacer(Modifier.height(4.dp))
                             Text(
                                 output,
@@ -1446,6 +1502,65 @@ private fun ToolPart(row: AssistantPartRow, painters: ChatPainters) {
 
 private fun truncateForDisplay(s: String, max: Int = 8000): String =
     if (s.length <= max) s else s.take(max) + "\n… (${s.length - max} more characters)"
+
+private data class EditDiffLine(val content: String, val isAddition: Boolean, val isDeletion: Boolean)
+
+private fun computeEditDiff(oldString: String, newString: String): List<EditDiffLine> {
+    val oldLines = oldString.lines()
+    val newLines = newString.lines()
+    if (oldLines == newLines) return oldLines.map { EditDiffLine(it, false, false) }
+    val ops = computeDiffOps(oldLines, newLines)
+    val result = mutableListOf<EditDiffLine>()
+    var oi = 0
+    var ni = 0
+    for (op in ops) {
+        when (op) {
+            DiffOp.EQUAL -> {
+                result.add(EditDiffLine(oldLines[oi++], false, false))
+                ni++
+            }
+            DiffOp.DELETE -> result.add(EditDiffLine(oldLines[oi++], false, true))
+            DiffOp.INSERT -> result.add(EditDiffLine(newLines[ni++], true, false))
+        }
+    }
+    return result
+}
+
+private enum class DiffOp { EQUAL, DELETE, INSERT }
+
+private fun computeDiffOps(old: List<String>, new: List<String>): List<DiffOp> {
+    val m = old.size
+    val n = new.size
+    val dp = Array(m + 1) { IntArray(n + 1) }
+    for (i in 1..m) {
+        for (j in 1..n) {
+            dp[i][j] = if (old[i - 1] == new[j - 1]) dp[i - 1][j - 1] + 1
+            else maxOf(dp[i - 1][j], dp[i][j - 1])
+        }
+    }
+    val ops = mutableListOf<DiffOp>()
+    var i = m
+    var j = n
+    while (i > 0 || j > 0) {
+        when {
+            i > 0 && j > 0 && old[i - 1] == new[j - 1] -> {
+                ops.add(DiffOp.EQUAL); i--; j--
+            }
+            j > 0 && (i == 0 || dp[i][j - 1] >= dp[i - 1][j]) -> {
+                ops.add(DiffOp.INSERT); j--
+            }
+            i > 0 -> {
+                ops.add(DiffOp.DELETE); i--
+            }
+        }
+    }
+    return ops.asReversed()
+}
+
+private val EditAddBg = Color(0xFFE6FFEC)
+private val EditDelBg = Color(0xFFFFEBE9)
+private val EditAddFg = Color(0xFF1A7F37)
+private val EditDelFg = Color(0xFFCF222E)
 
 private fun matchCount(part: LegacyPart): String? {
     if (part.tool !in setOf("glob", "grep")) return null

@@ -21,6 +21,7 @@ material3 = "1.11.0-alpha07"
 multiplatform-settings = "1.3.0"
 termlib = "0.0.36"
 syntaxmp = "0.3.0"
+kotlin-multiplatform-diff = "1.1.0"
 
 [libraries]
 kotlin-test = { module = "org.jetbrains.kotlin:kotlin-test", version.ref = "kotlin" }
@@ -53,6 +54,7 @@ intellij-markdown = { module = "org.jetbrains:markdown", version.ref = "intellij
 multiplatform-settings-no-arg = { module = "com.russhwolf:multiplatform-settings-no-arg", version.ref = "multiplatform-settings" }
 termlib = { module = "org.connectbot:termlib", version.ref = "termlib" }
 syntaxmp = { module = "com.gallatinapps.syntaxmp:syntaxmp", version.ref = "syntaxmp" }
+kotlin-multiplatform-diff = { module = "io.github.petertrr:kotlin-multiplatform-diff", version.ref = "kotlin-multiplatform-diff" }
 
 [plugins]
 androidApplication = { id = "com.android.application", version.ref = "agp" }
