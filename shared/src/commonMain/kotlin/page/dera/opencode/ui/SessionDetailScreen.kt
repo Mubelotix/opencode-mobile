@@ -36,6 +36,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.text.selection.SelectionContainer
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Checkbox
@@ -306,7 +307,7 @@ private fun buildRows(messages: List<LegacyWithParts>, showIndicator: Boolean, p
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun SessionDetailScreen(api: OpencodeApi, sessionId: String, sessionTitle: String, directory: String, projectRoot: String, onBack: () -> Unit, onMenuClick: (() -> Unit)? = null, onTitleChange: ((String) -> Unit)? = null) {
+fun SessionDetailScreen(api: OpencodeApi, sessionId: String, sessionTitle: String, directory: String, projectRoot: String, onBack: () -> Unit, onMenuClick: (() -> Unit)? = null, onTitleChange: ((String) -> Unit)? = null, onDeleteSession: (() -> Unit)? = null) {
     val messages = remember { mutableStateListOf<LegacyWithParts>() }
     @OptIn(ExperimentalFoundationApi::class)
     val listState = rememberLazyListState(prefetchStrategy = remember { DeepPrefetchStrategy(depth = 8) })
@@ -905,7 +906,7 @@ fun SessionDetailScreen(api: OpencodeApi, sessionId: String, sessionTitle: Strin
                     TerminalContent(api, directory)
                 }
             } else if (selectedTab == 4) {
-                InfoContent(sessionTokens, sessionCost, sessionModel, providers, messages)
+                InfoContent(sessionTokens, sessionCost, sessionModel, providers, messages, sessionId, api, directory, onDeleteSession)
             } else if (selectedTab != 0 && selectedTab != 1) {
                 Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
                     Text(
@@ -1802,6 +1803,10 @@ private fun InfoContent(
     sessionModel: SessionModel?,
     providers: List<ProviderInfo>,
     messages: List<LegacyWithParts>,
+    sessionId: String,
+    api: OpencodeApi,
+    directory: String,
+    onDeleteSession: (() -> Unit)?,
 ) {
     val tokens = sessionTokens
     if (tokens == null && sessionCost == null) {
@@ -1918,6 +1923,44 @@ private fun InfoContent(
             lastMessage?.let {
                 InfoStat(label = "Last message", value = formatTimestamp(it.info.time.created))
             }
+        }
+
+        Spacer(Modifier.height(24.dp))
+
+        val scope = rememberCoroutineScope()
+        var showDeleteDialog by remember { mutableStateOf(false) }
+        OutlinedButton(
+            onClick = { showDeleteDialog = true },
+            border = BorderStroke(1.dp, MaterialTheme.colorScheme.error),
+            modifier = Modifier.fillMaxWidth(),
+        ) {
+            Text("Delete Session", color = MaterialTheme.colorScheme.error)
+        }
+
+        if (showDeleteDialog) {
+            AlertDialog(
+                onDismissRequest = { showDeleteDialog = false },
+                title = { Text("Delete Session") },
+                text = { Text("Permanently delete this session and all associated data, including messages and history?") },
+                confirmButton = {
+                    TextButton(
+                        onClick = {
+                            showDeleteDialog = false
+                            scope.launch {
+                                api.deleteSession(sessionId, directory)
+                                onDeleteSession?.invoke()
+                            }
+                        },
+                    ) {
+                        Text("Delete", color = MaterialTheme.colorScheme.error)
+                    }
+                },
+                dismissButton = {
+                    TextButton(onClick = { showDeleteDialog = false }) {
+                        Text("Cancel")
+                    }
+                },
+            )
         }
     }
 }

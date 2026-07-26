@@ -230,6 +230,10 @@ fun App() {
                         onOpenProject = { a, dir, name -> openProject(a, dir, name, activeTab.id) },
                         onOpenSession = { a, s -> openSession(a, s) },
                         onSwitchTab = { activeTabId = it },
+                        onDeleteSession = {
+                            tabs = tabs.filter { t -> t.id != activeTab.id }
+                            activeTabId = tabs.firstOrNull()?.id
+                        },
                     )
                 } else {
                     LandingContent(
@@ -323,6 +327,7 @@ private fun TabContent(
     onOpenProject: (OpencodeApi, String, String) -> Unit,
     onOpenSession: (OpencodeApi, SessionInfo) -> Unit,
     onSwitchTab: (String) -> Unit,
+    onDeleteSession: () -> Unit,
 ) {
     when (val ts = tab.screen) {
         is TabScreen.ProjectSelection -> {
@@ -407,6 +412,7 @@ private fun TabContent(
                 onTitleChange = { newTitle ->
                     onUpdateTab(tab.copy(screen = TabScreen.SessionDetail(ts.api, ts.directory, ts.projectName, ts.session.copy(title = newTitle))))
                 },
+                onDeleteSession = onDeleteSession,
             )
         }
     }

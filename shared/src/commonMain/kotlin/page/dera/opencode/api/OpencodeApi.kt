@@ -251,6 +251,17 @@ class OpencodeApi(
         } catch (e: Exception) { Result.failure(e) }
     }
 
+    suspend fun deleteSession(sessionId: String, directory: String): Result<Unit> {
+        return try {
+            val resp = client.delete("$serverUrl/session/$sessionId") {
+                authHeader()?.let { (k, v) -> header(k, v) }
+                url.parameters.append("directory", directory)
+            }
+            if (resp.status.isSuccess()) Result.success(Unit)
+            else Result.failure(Exception("HTTP ${resp.status.value}"))
+        } catch (e: Exception) { Result.failure(e) }
+    }
+
     suspend fun getSessionTodo(sessionId: String, directory: String): Result<List<TodoInfo>> {
         return try {
             val b = client.get("$serverUrl/api/session/$sessionId/todo") {
