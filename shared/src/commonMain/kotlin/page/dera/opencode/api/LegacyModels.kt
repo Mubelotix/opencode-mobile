@@ -1,5 +1,6 @@
 package page.dera.opencode.api
 
+import kotlinx.serialization.EncodeDefault
 import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.JsonClassDiscriminator
@@ -218,6 +219,8 @@ sealed interface LegacyToolState {
 @Serializable
 data class LegacyPromptPayload(
     val parts: List<LegacyPromptPart>,
+    @EncodeDefault(EncodeDefault.Mode.NEVER)
+    val agent: String? = null,
 )
 
 @Serializable

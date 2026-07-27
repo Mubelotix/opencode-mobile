@@ -27,6 +27,13 @@ adb shell am start -n page.dera.opencode/.MainActivity
 adb logcat -s System.out | grep OC_DBG
 ```
 
+## Dev server
+```bash
+# The Android device connects to 192.168.1.88:4096 (creds from shared prefs).
+# You can hit the server directly with curl to test endpoints:
+PASSWORD_B64=$(echo -n "opencode:mysecret" | base64) && curl -s -H "Authorization: Basic $PASSWORD_B64" "http://192.168.1.88:4096/api/session"
+```
+
 ## ADB device setup
 ```bash
 adb devices -l                    # verify connected

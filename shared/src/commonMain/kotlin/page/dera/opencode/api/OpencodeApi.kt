@@ -175,9 +175,9 @@ class OpencodeApi(
         } catch (e: Exception) { println("OC_DBG: question reject error=${e.message}"); Result.failure(e) }
     }
 
-    suspend fun sendPrompt(sessionId: String, text: String): Result<Unit> {
+    suspend fun sendPrompt(sessionId: String, text: String, agent: String? = null): Result<Unit> {
         return try {
-            val p = LegacyPromptPayload(parts = listOf(LegacyPromptPart(type = "text", text = text, synthetic = false)))
+            val p = LegacyPromptPayload(parts = listOf(LegacyPromptPart(type = "text", text = text, synthetic = false)), agent = agent)
             client.post("$serverUrl/session/$sessionId/prompt_async") {
                 authHeader()?.let { (k, v) -> header(k, v) }; contentType(ContentType.Application.Json)
                 setBody(json.encodeToString(LegacyPromptPayload.serializer(), p))
@@ -267,6 +267,37 @@ class OpencodeApi(
                 setBody(body)
             }
             println("OC_DBG: switchModel response status=${resp.status}")
+            if (resp.status.isSuccess()) Result.success(Unit)
+            else {
+                val errBody = try { resp.bodyAsText() } catch (_: Exception) { "" }
+                Result.failure(Exception("HTTP ${resp.status.value}${if (errBody.isNotBlank()) ": $errBody" else ""}"))
+            }
+        } catch (e: Exception) { Result.failure(e) }
+    }
+
+    suspend fun listAgents(directory: String): Result<List<AgentInfo>> {
+        return try {
+            val b = client.get("$serverUrl/api/agent") {
+                authHeader()?.let { (k, v) -> header(k, v) }
+                url.parameters.append("location.directory", directory)
+            }.bodyAsText()
+            val response = json.decodeFromString<AgentListResponse>(b)
+            Result.success(response.data)
+        } catch (e: Exception) { Result.failure(e) }
+    }
+
+    suspend fun switchAgent(sessionId: String, agentName: String, directory: String): Result<Unit> {
+        return try {
+            val payload = SwitchAgentPayload(agent = agentName)
+            val body = json.encodeToString(SwitchAgentPayload.serializer(), payload)
+            println("OC_DBG: switchAgent POST /api/session/$sessionId/agent body=$body")
+            val resp = client.post("$serverUrl/api/session/$sessionId/agent") {
+                authHeader()?.let { (k, v) -> header(k, v) }
+                contentType(ContentType.Application.Json)
+                url.parameters.append("directory", directory)
+                setBody(body)
+            }
+            println("OC_DBG: switchAgent response status=${resp.status}")
             if (resp.status.isSuccess()) Result.success(Unit)
             else {
                 val errBody = try { resp.bodyAsText() } catch (_: Exception) { "" }

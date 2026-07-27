@@ -253,6 +253,25 @@ data class SessionRetryAction(
 )
 
 @Serializable
+data class AgentInfo(
+    val id: String,
+    val description: String? = null,
+    val mode: String = "primary",
+    val hidden: Boolean = false,
+    val color: String? = null,
+)
+
+@Serializable
+data class AgentListResponse(
+    val data: List<AgentInfo> = emptyList(),
+)
+
+@Serializable
+data class SwitchAgentPayload(
+    val agent: String,
+)
+
+@Serializable
 data class TodoInfo(
     val content: String,
     val status: String,

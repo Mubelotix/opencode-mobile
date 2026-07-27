@@ -93,6 +93,7 @@ import kotlin.time.Clock
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
+import page.dera.opencode.api.AgentInfo
 import page.dera.opencode.api.CommandInfo
 import page.dera.opencode.api.LegacyInfo
 import page.dera.opencode.api.LegacyPart
@@ -332,6 +333,8 @@ fun SessionDetailScreen(api: OpencodeApi, sessionId: String, sessionTitle: Strin
     var sessionTokens by remember { mutableStateOf<SessionTokens?>(null) }
     var sessionCost by remember { mutableStateOf<Double?>(null) }
     var sessionModel by remember { mutableStateOf<SessionModel?>(null) }
+    var sessionAgent by remember { mutableStateOf<String?>(null) }
+    var agents by remember { mutableStateOf<List<AgentInfo>>(emptyList()) }
     var providers by remember { mutableStateOf<List<ProviderInfo>>(emptyList()) }
     var connectedProviders by remember { mutableStateOf<Set<String>>(emptySet()) }
     var commands by remember { mutableStateOf<List<CommandInfo>>(emptyList()) }
@@ -389,13 +392,16 @@ fun SessionDetailScreen(api: OpencodeApi, sessionId: String, sessionTitle: Strin
                 val cleanId = if (sm.id.startsWith("openrouter/")) sm.id.removePrefix("openrouter/") else sm.id
                 SessionModel(id = cleanId, providerID = sm.providerID)
             }
+            sessionAgent = info.agent
             currentTitle = info.title.ifEmpty { currentTitle }
+            println("OC_DBG: sessionLoaded sessionId=$sessionId agent=${info.agent}")
         }
         api.listProvidersFull(directory).onSuccess {
             providers = it.all
             connectedProviders = it.connected.toSet()
         }
         api.listCommands(directory).onSuccess { commands = it }
+        api.listAgents(directory).onSuccess { agents = it.filter { !it.hidden } }
     }
 
     LaunchedEffect(sessionId, directory) {
@@ -515,6 +521,11 @@ fun SessionDetailScreen(api: OpencodeApi, sessionId: String, sessionTitle: Strin
                                     sessionModel = SessionModel(id = cleanId, providerID = sm.providerID)
                                 }
                             } catch (_: Exception) {}
+                        }
+                        "session.next.agent.switched", "session.agent.switched" -> {
+                            println("OC_DBG: session.next.agent.switched props=$props")
+                            sessionAgent = props["agent"]?.jsonPrimitive?.contentOrNull
+                                ?: props["data"]?.jsonObject?.get("agent")?.jsonPrimitive?.contentOrNull
                         }
                         "session.next.model.switched", "session.model.switched" -> {
                             println("OC_DBG: session.next.model.switched props=$props")
@@ -875,7 +886,7 @@ fun SessionDetailScreen(api: OpencodeApi, sessionId: String, sessionTitle: Strin
                             errorText = null
                             scope.launch {
                                 println("OC_DBG: send")
-                                if (api.sendPrompt(sessionId, t).isSuccess) {
+                                if (api.sendPrompt(sessionId, t, sessionAgent).isSuccess) {
                                     println("OC_DBG: send ok")
                                 } else {
                                     println("OC_DBG: send fail")
@@ -898,7 +909,7 @@ fun SessionDetailScreen(api: OpencodeApi, sessionId: String, sessionTitle: Strin
                             reviewComments.clear()
                             isSending = true
                             scope.launch {
-                                if (api.sendPrompt(sessionId, md).isSuccess) { println("OC_DBG: review sent") }
+                                if (api.sendPrompt(sessionId, md, sessionAgent).isSuccess) { println("OC_DBG: review sent") }
                                 else { errorText = "Failed to send review" }
                                 isSending = false
                             }
@@ -1017,7 +1028,7 @@ fun SessionDetailScreen(api: OpencodeApi, sessionId: String, sessionTitle: Strin
                     TerminalContent(api, directory)
                 }
             } else if (selectedTab == 4) {
-                InfoContent(sessionTokens, sessionCost, sessionModel, providers, connectedProviders, messages, sessionId, api, directory, onDeleteSession, onModelChange = { sessionModel = it })
+                InfoContent(sessionTokens, sessionCost, sessionModel, providers, connectedProviders, messages, sessionId, api, directory, onDeleteSession, onModelChange = { sessionModel = it }, sessionAgent = sessionAgent, agents = agents, onAgentChange = { sessionAgent = it })
             } else if (selectedTab != 0 && selectedTab != 1 && selectedTab != 5) {
                 Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
                     Text(
@@ -2006,6 +2017,32 @@ private sealed interface ModelPickerItem {
     data class Model(val providerId: String, val providerName: String, val model: ProviderModel) : ModelPickerItem
 }
 
+private fun agentColor(agent: AgentInfo?): Color = when (agent?.color) {
+    "blue" -> Color(0xFF3B82F6)
+    "purple" -> Color(0xFF8B5CF6)
+    "green" -> Color(0xFF22C55E)
+    "orange" -> Color(0xFFF97316)
+    "red" -> Color(0xFFEF4444)
+    "yellow" -> Color(0xFFEAB308)
+    "cyan" -> Color(0xFF06B6D4)
+    "pink" -> Color(0xFFEC4899)
+    else -> when (agent?.id) {
+        "build" -> Color(0xFF3B82F6)
+        "plan" -> Color(0xFF8B5CF6)
+        "general" -> Color(0xFF22C55E)
+        "explore" -> Color(0xFFF97316)
+        else -> Color(0xFF3B82F6)
+    }
+}
+
+private fun agentDisplayName(id: String): String = when (id) {
+    "build" -> "Build"
+    "plan" -> "Plan"
+    "general" -> "General"
+    "explore" -> "Explore"
+    else -> id.replaceFirstChar { it.uppercase() }
+}
+
 @Composable
 private fun InfoContent(
     sessionTokens: SessionTokens?,
@@ -2019,11 +2056,17 @@ private fun InfoContent(
     directory: String,
     onDeleteSession: (() -> Unit)?,
     onModelChange: ((SessionModel) -> Unit)? = null,
+    sessionAgent: String? = null,
+    agents: List<AgentInfo> = emptyList(),
+    onAgentChange: ((String?) -> Unit)? = null,
 ) {
     val scope = rememberCoroutineScope()
     var showModelDialog by remember { mutableStateOf(false) }
     var isSwitchingModel by remember { mutableStateOf(false) }
     var modelError by remember { mutableStateOf<String?>(null) }
+    var showAgentDialog by remember { mutableStateOf(false) }
+    var isSwitchingAgent by remember { mutableStateOf(false) }
+    var agentError by remember { mutableStateOf<String?>(null) }
 
     val userCount = messages.count { it.info.role == "user" }
     val assistantCount = messages.count { it.info.role == "assistant" }
@@ -2138,6 +2181,187 @@ private fun InfoContent(
                 text = modelError!!,
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.error,
+            )
+        }
+
+        Spacer(Modifier.height(20.dp))
+
+        Text(
+            "Agent",
+            style = MaterialTheme.typography.titleSmall,
+            color = MaterialTheme.colorScheme.onSurface,
+        )
+        Spacer(Modifier.height(8.dp))
+
+        val currentAgentName = sessionAgent ?: "build"
+        val currentAgent = agents.find { it.id == currentAgentName }
+        val agentColor = agentColor(currentAgent)
+
+        Box(
+            modifier = Modifier
+                .fillMaxWidth()
+                .clip(RoundedCornerShape(12.dp))
+                .background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f))
+                .border(
+                    BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
+                    RoundedCornerShape(12.dp),
+                )
+                .clickable { showAgentDialog = true }
+                .padding(14.dp),
+        ) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.SpaceBetween,
+            ) {
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    modifier = Modifier.weight(1f),
+                ) {
+                    Box(
+                        Modifier
+                            .size(10.dp)
+                            .clip(CircleShape)
+                            .background(agentColor),
+                    )
+                    Spacer(Modifier.width(10.dp))
+                    Column {
+                        Text(
+                            text = agentDisplayName(currentAgentName),
+                            style = MaterialTheme.typography.bodyLarge,
+                            color = MaterialTheme.colorScheme.onSurface,
+                        )
+                        currentAgent?.description?.let { desc ->
+                            if (desc.isNotBlank()) {
+                                Text(
+                                    text = desc,
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                    maxLines = 2,
+                                    overflow = TextOverflow.Ellipsis,
+                                )
+                            }
+                        }
+                    }
+                }
+                if (isSwitchingAgent) {
+                    CircularProgressIndicator(
+                        modifier = Modifier.size(20.dp),
+                        strokeWidth = 2.dp,
+                    )
+                } else {
+                    OutlinedButton(
+                        onClick = { showAgentDialog = true },
+                        contentPadding = PaddingValues(horizontal = 12.dp, vertical = 4.dp),
+                    ) {
+                        Text("Change", style = MaterialTheme.typography.labelMedium)
+                    }
+                }
+            }
+        }
+
+        if (agentError != null) {
+            Spacer(Modifier.height(4.dp))
+            Text(
+                text = agentError!!,
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.error,
+            )
+        }
+
+        if (showAgentDialog) {
+            AlertDialog(
+                onDismissRequest = { showAgentDialog = false },
+                title = { Text("Select Agent") },
+                text = {
+                    Column(Modifier.fillMaxWidth()) {
+                        if (agents.isEmpty()) {
+                            Box(
+                                modifier = Modifier.fillMaxWidth().height(80.dp),
+                                contentAlignment = Alignment.Center,
+                            ) {
+                                CircularProgressIndicator(modifier = Modifier.size(24.dp))
+                            }
+                        } else {
+                            LazyColumn(
+                                modifier = Modifier.fillMaxWidth().heightIn(max = 400.dp),
+                            ) {
+                                items(agents, key = { it.id }) { agent ->
+                                    val isSelected = agent.id == sessionAgent
+                                    val color = agentColor(agent)
+                                    Row(
+                                        modifier = Modifier
+                                            .fillMaxWidth()
+                                            .clip(RoundedCornerShape(8.dp))
+                                            .background(if (isSelected) MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.4f) else Color.Transparent)
+                                            .clickable {
+                                                showAgentDialog = false
+                                                isSwitchingAgent = true
+                                                agentError = null
+                                                scope.launch {
+                                                    val res = api.switchAgent(sessionId, agent.id, directory)
+                                                    isSwitchingAgent = false
+                                                    res.fold(
+                                                        onSuccess = {
+                                                            println("OC_DBG: agent switched to ${agent.id}")
+                                                            onAgentChange?.invoke(agent.id)
+                                                        },
+                                                        onFailure = { err ->
+                                                            agentError = "Failed to switch agent: ${err.message}"
+                                                        },
+                                                    )
+                                                }
+                                            }
+                                            .padding(horizontal = 10.dp, vertical = 8.dp),
+                                        verticalAlignment = Alignment.CenterVertically,
+                                        horizontalArrangement = Arrangement.SpaceBetween,
+                                    ) {
+                                        Row(
+                                            verticalAlignment = Alignment.CenterVertically,
+                                            modifier = Modifier.weight(1f),
+                                        ) {
+                                            Box(
+                                                Modifier
+                                                    .size(10.dp)
+                                                    .clip(CircleShape)
+                                                    .background(color),
+                                            )
+                                            Spacer(Modifier.width(10.dp))
+                                            Column {
+                                                Text(
+                                                    text = agentDisplayName(agent.id),
+                                                    style = MaterialTheme.typography.bodyMedium,
+                                                    color = MaterialTheme.colorScheme.onSurface,
+                                                )
+                                                agent.description?.let { desc ->
+                                                    if (desc.isNotBlank()) {
+                                                        Text(
+                                                            text = desc,
+                                                            style = MaterialTheme.typography.bodySmall,
+                                                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                                            maxLines = 3,
+                                                            overflow = TextOverflow.Ellipsis,
+                                                        )
+                                                    }
+                                                }
+                                            }
+                                        }
+                                        RadioButton(
+                                            selected = isSelected,
+                                            onClick = null,
+                                        )
+                                    }
+                                }
+                            }
+                        }
+                    }
+                },
+                confirmButton = {},
+                dismissButton = {
+                    TextButton(onClick = { showAgentDialog = false }) {
+                        Text("Cancel")
+                    }
+                },
             )
         }
 
