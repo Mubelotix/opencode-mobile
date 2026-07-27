@@ -18,3 +18,7 @@ captures
 **/xcshareddata/WorkspaceSettings.xcsettings
 node_modules/
 .tmp/
+opencode-server-config/
+opencode-server-data/
+opencode-config/
+opencode-data/

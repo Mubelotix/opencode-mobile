@@ -4,7 +4,7 @@
 
 ### 1. Create OpenRouter provider config
 
-Create `./.tmp/opencode-config/opencode.json`:
+Create `./opencode-server-config/opencode.json`:
 ```json
 {
   "provider": {
@@ -28,7 +28,7 @@ Create `./.tmp/opencode-config/opencode.json`:
 ### 2. Start the server
 
 ```bash
-XDG_DATA_HOME=./.tmp OPENCODE_CONFIG_DIR=./.tmp/opencode-config OPENCODE_SERVER_PASSWORD=mysecret opencode serve --hostname 0.0.0.0 --port 4096
+XDG_DATA_HOME=./opencode-server-data OPENCODE_CONFIG_DIR=./opencode-server-config OPENCODE_SERVER_PASSWORD=mysecret opencode serve --hostname 0.0.0.0 --port 4096
 ```
 
 The server listens on `http://0.0.0.0:4096` with HTTP Basic Auth:

@@ -107,6 +107,7 @@ import page.dera.opencode.api.QuestionOption
 import page.dera.opencode.api.QuestionRequest
 import page.dera.opencode.api.QuestionToolRef
 import page.dera.opencode.api.ProviderInfo
+import page.dera.opencode.api.ProviderModel
 import page.dera.opencode.api.SessionModel
 import page.dera.opencode.api.SessionTokens
 import page.dera.opencode.api.SessionInfo
@@ -304,10 +305,12 @@ private fun buildRows(messages: List<LegacyWithParts>, showIndicator: Boolean, p
                     )
                 }
             }
-            else -> rows.add(SystemTextRow(
-                "s:${msg.info.id}",
-                parts.filter { it.type == "text" && !it.text.isNullOrBlank() }.joinToString("\n") { it.text!! },
-            ))
+            else -> {
+                val sysText = parts.filter { it.type == "text" && !it.text.isNullOrBlank() }.joinToString("\n") { it.text!! }
+                if (sysText.isNotBlank()) {
+                    rows.add(SystemTextRow("s:${msg.info.id}", sysText))
+                }
+            }
         }
     }
     if (showIndicator) rows.add(IndicatorRow)
@@ -381,7 +384,10 @@ fun SessionDetailScreen(api: OpencodeApi, sessionId: String, sessionTitle: Strin
         api.getSession(sessionId, directory).onSuccess { info ->
             sessionTokens = info.tokens
             sessionCost = info.cost
-            sessionModel = info.model
+            sessionModel = info.model?.let { sm ->
+                val cleanId = if (sm.id.startsWith("openrouter/")) sm.id.removePrefix("openrouter/") else sm.id
+                SessionModel(id = cleanId, providerID = sm.providerID)
+            }
             currentTitle = info.title.ifEmpty { currentTitle }
         }
         api.listProviders(directory).onSuccess { providers = it }
@@ -498,6 +504,27 @@ fun SessionDetailScreen(api: OpencodeApi, sessionId: String, sessionTitle: Strin
                                 sessionTokens = Json { ignoreUnknownKeys = true; coerceInputValues = true }.decodeFromJsonElement(SessionTokens.serializer(), infoJson["tokens"] ?: return@collect)
                             } catch (_: Exception) {}
                             sessionCost = infoJson["cost"]?.jsonPrimitive?.contentOrNull?.toDoubleOrNull()
+                            try {
+                                infoJson["model"]?.let { mJson ->
+                                    val sm = Json { ignoreUnknownKeys = true; coerceInputValues = true }.decodeFromJsonElement(SessionModel.serializer(), mJson)
+                                    val cleanId = if (sm.id.startsWith("openrouter/")) sm.id.removePrefix("openrouter/") else sm.id
+                                    sessionModel = SessionModel(id = cleanId, providerID = sm.providerID)
+                                }
+                            } catch (_: Exception) {}
+                        }
+                        "session.next.model.switched", "session.model.switched" -> {
+                            println("OC_DBG: session.next.model.switched props=$props")
+                            try {
+                                val modelObj = props["model"]?.jsonObject ?: props["data"]?.jsonObject?.get("model")?.jsonObject
+                                if (modelObj != null) {
+                                    val providerID = modelObj["providerID"]?.jsonPrimitive?.content ?: ""
+                                    val rawId = modelObj["id"]?.jsonPrimitive?.content ?: ""
+                                    val cleanId = if (rawId.startsWith("openrouter/")) rawId.removePrefix("openrouter/") else rawId
+                                    sessionModel = SessionModel(id = cleanId, providerID = providerID)
+                                }
+                            } catch (e: Exception) {
+                                println("OC_DBG: session.next.model.switched decode error=${e.message}")
+                            }
                         }
                         "permission.asked" -> {
                             println("OC_DBG: permission.asked props=$props")
@@ -720,7 +747,7 @@ fun SessionDetailScreen(api: OpencodeApi, sessionId: String, sessionTitle: Strin
         Box(Modifier.fillMaxSize().padding(padding)) {
             Column(
                 Modifier.fillMaxSize()
-                    .zIndex(if (selectedTab == 0) 1f else 0f)
+                    .zIndex(if (selectedTab == 0) 1f else -1f)
                     .then(if (selectedTab == 0) Modifier else Modifier.alpha(0f))
             ) {
                 if (errorText != null) {
@@ -986,7 +1013,7 @@ fun SessionDetailScreen(api: OpencodeApi, sessionId: String, sessionTitle: Strin
                     TerminalContent(api, directory)
                 }
             } else if (selectedTab == 4) {
-                InfoContent(sessionTokens, sessionCost, sessionModel, providers, messages, sessionId, api, directory, onDeleteSession)
+                InfoContent(sessionTokens, sessionCost, sessionModel, providers, messages, sessionId, api, directory, onDeleteSession, onModelChange = { sessionModel = it })
             } else if (selectedTab != 0 && selectedTab != 1 && selectedTab != 5) {
                 Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
                     Text(
@@ -998,14 +1025,14 @@ fun SessionDetailScreen(api: OpencodeApi, sessionId: String, sessionTitle: Strin
             }
             Box(
                 Modifier.fillMaxSize()
-                    .zIndex(if (selectedTab == 1) 1f else 0f)
+                    .zIndex(if (selectedTab == 1) 1f else -1f)
                     .then(if (selectedTab == 1) Modifier else Modifier.alpha(0f))
             ) {
                 GitDiffContent(api, directory, fileChangeTick, reviewComments)
             }
             Box(
                 Modifier.fillMaxSize()
-                    .zIndex(if (selectedTab == 5) 1f else 0f)
+                    .zIndex(if (selectedTab == 5) 1f else -1f)
                     .then(if (selectedTab == 5) Modifier else Modifier.alpha(0f))
             ) {
                 BrowserContent(settings)
@@ -1970,6 +1997,11 @@ private fun formatCost(cost: Double): String {
     return "$$dollars.${cents.toString().padStart(2, '0')}"
 }
 
+private sealed interface ModelPickerItem {
+    data class Header(val id: String, val name: String) : ModelPickerItem
+    data class Model(val providerId: String, val providerName: String, val model: ProviderModel) : ModelPickerItem
+}
+
 @Composable
 private fun InfoContent(
     sessionTokens: SessionTokens?,
@@ -1981,36 +2013,22 @@ private fun InfoContent(
     api: OpencodeApi,
     directory: String,
     onDeleteSession: (() -> Unit)?,
+    onModelChange: ((SessionModel) -> Unit)? = null,
 ) {
-    val tokens = sessionTokens
-    if (tokens == null && sessionCost == null) {
-        Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-            Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                Text(
-                    "Session info not available yet",
-                    style = MaterialTheme.typography.bodyLarge,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
-                Spacer(Modifier.height(4.dp))
-                Text(
-                    "Run a prompt to see token usage and cost",
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
-            }
-        }
-        return
-    }
+    val scope = rememberCoroutineScope()
+    var showModelDialog by remember { mutableStateOf(false) }
+    var isSwitchingModel by remember { mutableStateOf(false) }
+    var modelError by remember { mutableStateOf<String?>(null) }
 
     val userCount = messages.count { it.info.role == "user" }
     val assistantCount = messages.count { it.info.role == "assistant" }
     val systemCount = messages.count { it.info.role == "system" }
 
-    val input = tokens?.input ?: 0
-    val output = tokens?.output ?: 0
-    val reasoning = tokens?.reasoning ?: 0
-    val cacheRead = tokens?.cache?.read ?: 0
-    val cacheWrite = tokens?.cache?.write ?: 0
+    val input = sessionTokens?.input ?: 0
+    val output = sessionTokens?.output ?: 0
+    val reasoning = sessionTokens?.reasoning ?: 0
+    val cacheRead = sessionTokens?.cache?.read ?: 0
+    val cacheWrite = sessionTokens?.cache?.write ?: 0
     val total = input + output + reasoning + cacheRead + cacheWrite
 
     val contextLimit = remember(sessionModel, providers) {
@@ -2018,8 +2036,11 @@ private fun InfoContent(
             SessionModel(id = it.modelID, providerID = it.providerID)
         }
         model?.let { m ->
-            providers.find { it.id == m.providerID }
-                ?.models?.get(m.id)
+            val cleanId = if (m.id.startsWith("openrouter/")) m.id.removePrefix("openrouter/") else m.id
+            val provider = providers.find { it.id == m.providerID }
+            (provider?.models?.get(cleanId)
+                ?: provider?.models?.get(m.id)
+                ?: provider?.models?.get("openrouter/$cleanId"))
                 ?.limit?.context
         }
     }
@@ -2038,34 +2059,132 @@ private fun InfoContent(
             .padding(horizontal = 16.dp, vertical = 12.dp),
     ) {
         Text(
+            "Model",
+            style = MaterialTheme.typography.titleSmall,
+            color = MaterialTheme.colorScheme.onSurface,
+        )
+        Spacer(Modifier.height(8.dp))
+
+        val rawModelId = sessionModel?.id ?: ""
+        val cleanModelId = if (rawModelId.startsWith("openrouter/")) rawModelId.removePrefix("openrouter/") else rawModelId
+
+        val currentProvider = providers.find { it.id == sessionModel?.providerID }
+        val currentModel = currentProvider?.models?.get(cleanModelId)
+            ?: currentProvider?.models?.get(rawModelId)
+            ?: currentProvider?.models?.get("openrouter/$cleanModelId")
+
+        val rawDisplayName = currentModel?.name?.ifEmpty { cleanModelId } ?: (if (cleanModelId.isNotEmpty()) cleanModelId else "Select model")
+        val modelDisplayName = if (rawDisplayName.startsWith("openrouter/")) rawDisplayName.removePrefix("openrouter/") else rawDisplayName
+        val providerDisplayName = currentProvider?.name?.ifEmpty { sessionModel?.providerID }
+            ?: sessionModel?.providerID
+            ?: ""
+
+        Box(
+            modifier = Modifier
+                .fillMaxWidth()
+                .clip(RoundedCornerShape(12.dp))
+                .background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f))
+                .border(
+                    BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
+                    RoundedCornerShape(12.dp),
+                )
+                .clickable { showModelDialog = true }
+                .padding(14.dp),
+        ) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.SpaceBetween,
+            ) {
+                Column(modifier = Modifier.weight(1f)) {
+                    if (providerDisplayName.isNotEmpty()) {
+                        Text(
+                            text = providerDisplayName,
+                            style = MaterialTheme.typography.labelMedium,
+                            color = MaterialTheme.colorScheme.primary,
+                        )
+                        Spacer(Modifier.height(2.dp))
+                    }
+                    Text(
+                        text = modelDisplayName,
+                        style = MaterialTheme.typography.bodyLarge,
+                        color = MaterialTheme.colorScheme.onSurface,
+                    )
+                }
+                if (isSwitchingModel) {
+                    CircularProgressIndicator(
+                        modifier = Modifier.size(20.dp),
+                        strokeWidth = 2.dp,
+                    )
+                } else {
+                    OutlinedButton(
+                        onClick = { showModelDialog = true },
+                        contentPadding = PaddingValues(horizontal = 12.dp, vertical = 4.dp),
+                    ) {
+                        Text("Change", style = MaterialTheme.typography.labelMedium)
+                    }
+                }
+            }
+        }
+
+        if (modelError != null) {
+            Spacer(Modifier.height(4.dp))
+            Text(
+                text = modelError!!,
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.error,
+            )
+        }
+
+        Spacer(Modifier.height(20.dp))
+
+        Text(
             "Context Usage",
             style = MaterialTheme.typography.titleSmall,
             color = MaterialTheme.colorScheme.onSurface,
         )
         Spacer(Modifier.height(12.dp))
 
-        val contextInput = if (msgTotal > 0) msgTotal - msgOutput - msgReasoning else msgInput
-        TokenBreakdownBar(
-            input = contextInput,
-            output = msgOutput,
-            reasoning = msgReasoning,
-            contextLimit = contextLimit,
-            modifier = Modifier.fillMaxWidth(),
-        )
-        Spacer(Modifier.height(16.dp))
+        if (sessionTokens == null && sessionCost == null) {
+            Box(
+                Modifier
+                    .fillMaxWidth()
+                    .clip(RoundedCornerShape(8.dp))
+                    .background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.3f))
+                    .padding(16.dp),
+                contentAlignment = Alignment.Center,
+            ) {
+                Text(
+                    "Token usage and cost will appear after running a prompt.",
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+        } else {
+            val contextInput = if (msgTotal > 0) msgTotal - msgOutput - msgReasoning else msgInput
+            TokenBreakdownBar(
+                input = contextInput,
+                output = msgOutput,
+                reasoning = msgReasoning,
+                contextLimit = contextLimit,
+                modifier = Modifier.fillMaxWidth(),
+            )
+            Spacer(Modifier.height(16.dp))
 
-        InfoStat(label = "Total tokens", value = formatTokenCount(total))
-        contextLimit?.let {
-            val usagePercent = if (it > 0 && msgTotal > 0) (msgTotal.toDouble() / it * 100).toInt() else 0
-            InfoStat(label = "Context limit", value = "${formatTokenCount(it)} (${usagePercent}% used)")
+            InfoStat(label = "Total tokens", value = formatTokenCount(total))
+            contextLimit?.let {
+                val usagePercent = if (it > 0 && msgTotal > 0) (msgTotal.toDouble() / it * 100).toInt() else 0
+                InfoStat(label = "Context limit", value = "${formatTokenCount(it)} (${usagePercent}% used)")
+            }
+            InfoStat(label = "Input tokens", value = formatTokenCount(input))
+            InfoStat(label = "Output tokens", value = formatTokenCount(output))
+            InfoStat(label = "Reasoning tokens", value = formatTokenCount(reasoning))
+            InfoStat(label = "Cache read", value = formatTokenCount(cacheRead))
+            InfoStat(label = "Cache write", value = formatTokenCount(cacheWrite))
+            InfoStat(label = "Cost", value = sessionCost?.let { formatCost(it) } ?: "—")
         }
-        InfoStat(label = "Input tokens", value = formatTokenCount(input))
-        InfoStat(label = "Output tokens", value = formatTokenCount(output))
-        InfoStat(label = "Reasoning tokens", value = formatTokenCount(reasoning))
-        InfoStat(label = "Cache read", value = formatTokenCount(cacheRead))
-        InfoStat(label = "Cache write", value = formatTokenCount(cacheWrite))
-        InfoStat(label = "Cost", value = sessionCost?.let { formatCost(it) } ?: "—")
-        Spacer(Modifier.height(16.dp))
+
+        Spacer(Modifier.height(20.dp))
 
         Text(
             "Messages",
@@ -2101,7 +2220,6 @@ private fun InfoContent(
 
         Spacer(Modifier.height(24.dp))
 
-        val scope = rememberCoroutineScope()
         var showDeleteDialog by remember { mutableStateOf(false) }
         OutlinedButton(
             onClick = { showDeleteDialog = true },
@@ -2109,6 +2227,165 @@ private fun InfoContent(
             modifier = Modifier.fillMaxWidth(),
         ) {
             Text("Delete Session", color = MaterialTheme.colorScheme.error)
+        }
+
+        if (showModelDialog) {
+            var searchQuery by remember { mutableStateOf("") }
+            val pickerItems = remember(providers, searchQuery) {
+                val result = mutableListOf<ModelPickerItem>()
+                val query = searchQuery.trim().lowercase()
+                for (provider in providers) {
+                    val matchingModels = provider.models.values.filter { m ->
+                        query.isEmpty() ||
+                        m.name.lowercase().contains(query) ||
+                        m.id.lowercase().contains(query) ||
+                        provider.name.lowercase().contains(query) ||
+                        provider.id.lowercase().contains(query)
+                    }
+                    if (matchingModels.isNotEmpty()) {
+                        result.add(ModelPickerItem.Header(provider.id, provider.name.ifEmpty { provider.id }))
+                        for (m in matchingModels) {
+                            result.add(ModelPickerItem.Model(provider.id, provider.name.ifEmpty { provider.id }, m))
+                        }
+                    }
+                }
+                result
+            }
+
+            AlertDialog(
+                onDismissRequest = { showModelDialog = false },
+                title = { Text("Select Model") },
+                text = {
+                    Column(Modifier.fillMaxWidth()) {
+                        OutlinedTextField(
+                            value = searchQuery,
+                            onValueChange = { searchQuery = it },
+                            placeholder = { Text("Search models...") },
+                            leadingIcon = {
+                                Icon(
+                                    painter = painterResource(searchIcon),
+                                    contentDescription = "Search",
+                                    modifier = Modifier.size(18.dp),
+                                )
+                            },
+                            trailingIcon = {
+                                if (searchQuery.isNotEmpty()) {
+                                    IconButton(onClick = { searchQuery = "" }) {
+                                        Icon(
+                                            painter = painterResource(circleXIcon),
+                                            contentDescription = "Clear",
+                                            modifier = Modifier.size(16.dp),
+                                        )
+                                    }
+                                }
+                            },
+                            singleLine = true,
+                            modifier = Modifier.fillMaxWidth().padding(bottom = 8.dp),
+                        )
+
+                        if (providers.isEmpty()) {
+                            Box(
+                                modifier = Modifier.fillMaxWidth().height(120.dp),
+                                contentAlignment = Alignment.Center,
+                            ) {
+                                CircularProgressIndicator(modifier = Modifier.size(24.dp))
+                            }
+                        } else if (pickerItems.isEmpty()) {
+                            Box(
+                                modifier = Modifier.fillMaxWidth().height(120.dp),
+                                contentAlignment = Alignment.Center,
+                            ) {
+                                Text(
+                                    "No models found",
+                                    style = MaterialTheme.typography.bodyMedium,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                )
+                            }
+                        } else {
+                            LazyColumn(
+                                modifier = Modifier.fillMaxWidth().height(360.dp),
+                            ) {
+                                items(pickerItems, key = { modelItem ->
+                                    when (modelItem) {
+                                        is ModelPickerItem.Header -> "h_${modelItem.id}"
+                                        is ModelPickerItem.Model -> "m_${modelItem.providerId}_${modelItem.model.id}"
+                                    }
+                                }) { modelItem ->
+                                    when (modelItem) {
+                                        is ModelPickerItem.Header -> {
+                                            Text(
+                                                text = modelItem.name,
+                                                style = MaterialTheme.typography.labelLarge,
+                                                color = MaterialTheme.colorScheme.primary,
+                                                modifier = Modifier.padding(top = 10.dp, bottom = 4.dp, start = 4.dp),
+                                            )
+                                        }
+                                        is ModelPickerItem.Model -> {
+                                            val pId = modelItem.providerId
+                                            val m = modelItem.model
+                                            val cleanMId = if (m.id.startsWith("openrouter/")) m.id.removePrefix("openrouter/") else m.id
+                                            val isSelected = sessionModel?.providerID == pId && (sessionModel?.id == cleanMId || sessionModel?.id == m.id)
+                                            Row(
+                                                modifier = Modifier
+                                                    .fillMaxWidth()
+                                                    .clip(RoundedCornerShape(8.dp))
+                                                    .background(if (isSelected) MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.4f) else Color.Transparent)
+                                                    .clickable {
+                                                        showModelDialog = false
+                                                        isSwitchingModel = true
+                                                        modelError = null
+                                                        scope.launch {
+                                                            val res = api.switchModel(sessionId, pId, cleanMId, directory)
+                                                            isSwitchingModel = false
+                                                            res.fold(
+                                                                onSuccess = {
+                                                                    onModelChange?.invoke(SessionModel(id = cleanMId, providerID = pId))
+                                                                },
+                                                                onFailure = { err ->
+                                                                    modelError = "Failed to switch model: ${err.message}"
+                                                                },
+                                                            )
+                                                        }
+                                                    }
+                                                    .padding(horizontal = 10.dp, vertical = 8.dp),
+                                                verticalAlignment = Alignment.CenterVertically,
+                                                horizontalArrangement = Arrangement.SpaceBetween,
+                                            ) {
+                                                Column(modifier = Modifier.weight(1f)) {
+                                                    val rawMName = m.name.ifEmpty { m.id }
+                                                    val displayMName = if (rawMName.startsWith("openrouter/")) rawMName.removePrefix("openrouter/") else rawMName
+                                                    Text(
+                                                        text = displayMName,
+                                                        style = MaterialTheme.typography.bodyMedium,
+                                                        color = MaterialTheme.colorScheme.onSurface,
+                                                    )
+                                                    if (m.limit.context > 0) {
+                                                        Text(
+                                                            text = "${formatTokenCount(m.limit.context)} context limit",
+                                                            style = MaterialTheme.typography.bodySmall,
+                                                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                                        )
+                                                    }
+                                                }
+                                                RadioButton(
+                                                    selected = isSelected,
+                                                    onClick = null,
+                                                )
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                },
+                confirmButton = {},
+                dismissButton = {
+                    TextButton(onClick = { showModelDialog = false }) {
+                        Text("Cancel")
+                    }
+                },
+            )
         }
 
         if (showDeleteDialog) {

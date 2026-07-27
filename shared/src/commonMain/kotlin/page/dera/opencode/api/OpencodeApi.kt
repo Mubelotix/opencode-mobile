@@ -9,6 +9,8 @@ import io.ktor.client.request.post
 import io.ktor.client.request.prepareGet
 import io.ktor.client.request.put
 import io.ktor.client.request.setBody
+import io.ktor.client.plugins.HttpTimeout
+import io.ktor.client.plugins.timeout
 import io.ktor.client.statement.bodyAsChannel
 import io.ktor.client.statement.bodyAsText
 import io.ktor.http.ContentType
@@ -109,7 +111,7 @@ class OpencodeApi(
 
     suspend fun createSession(directory: String): Result<SessionInfo> {
         return try {
-            val p = SessionCreatePayload(location = CreateSessionLocation(directory), model = SessionCreateModel(id = "deepseek-v4-flash-free", providerID = "opencode"))
+            val p = SessionCreatePayload(location = CreateSessionLocation(directory))
             val b = client.post("$serverUrl/api/session") {
                 authHeader()?.let { (k, v) -> header(k, v) }; contentType(ContentType.Application.Json)
                 setBody(json.encodeToString(SessionCreatePayload.serializer(), p))
@@ -237,6 +239,27 @@ class OpencodeApi(
                 setBody(json.encodeToString(SessionUpdatePayload.serializer(), p))
             }
             Result.success(Unit)
+        } catch (e: Exception) { Result.failure(e) }
+    }
+
+    suspend fun switchModel(sessionId: String, providerId: String, modelId: String, directory: String): Result<Unit> {
+        return try {
+            val cleanModelId = if (modelId.startsWith("openrouter/")) modelId.removePrefix("openrouter/") else modelId
+            val payload = SwitchModelPayload(model = SwitchModelRef(id = cleanModelId, providerID = providerId))
+            val body = json.encodeToString(SwitchModelPayload.serializer(), payload)
+            println("OC_DBG: switchModel POST /api/session/$sessionId/model body=$body")
+            val resp = client.post("$serverUrl/api/session/$sessionId/model") {
+                authHeader()?.let { (k, v) -> header(k, v) }
+                contentType(ContentType.Application.Json)
+                url.parameters.append("directory", directory)
+                setBody(body)
+            }
+            println("OC_DBG: switchModel response status=${resp.status}")
+            if (resp.status.isSuccess()) Result.success(Unit)
+            else {
+                val errBody = try { resp.bodyAsText() } catch (_: Exception) { "" }
+                Result.failure(Exception("HTTP ${resp.status.value}${if (errBody.isNotBlank()) ": $errBody" else ""}"))
+            }
         } catch (e: Exception) { Result.failure(e) }
     }
 
@@ -384,7 +407,12 @@ class OpencodeApi(
             println("OC_DBG: SSE connecting for dir=$directory")
             try {
                 client.prepareGet("$serverUrl/global/event") {
-                    authHeader()?.let { (k, v) -> header(k, v) }; url.parameters.append("directory", directory)
+                    authHeader()?.let { (k, v) -> header(k, v) }
+                    url.parameters.append("directory", directory)
+                    timeout {
+                        requestTimeoutMillis = Long.MAX_VALUE
+                        socketTimeoutMillis = Long.MAX_VALUE
+                    }
                 }.execute { response ->
                     val channel = response.bodyAsChannel()
                     var dataBuffer = ""

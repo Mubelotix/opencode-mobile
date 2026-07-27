@@ -46,6 +46,18 @@ data class SessionModel(
 )
 
 @Serializable
+data class SwitchModelRef(
+    val id: String,
+    @SerialName("providerID")
+    val providerID: String,
+)
+
+@Serializable
+data class SwitchModelPayload(
+    val model: SwitchModelRef,
+)
+
+@Serializable
 data class ProviderListResponse(
     val all: List<ProviderInfo> = emptyList(),
     val connected: List<String> = emptyList(),
