@@ -1,4 +1,4 @@
-# OpencodeApp
+# OpenCode Mobile
 
 <div align="center">
 
