@@ -1698,7 +1698,7 @@ private fun ToolPart(row: AssistantPartRow, painters: ChatPainters) {
         val isExpandable = part.tool in setOf("websearch", "webfetch", "question", "invalid", "read", "write", "edit", "todowrite")
         val icon = when {
             part.tool == "invalid" -> painters.invalid
-            part.tool == "edit" -> painters.filePen
+            part.tool in listOf("edit", "write", "create") -> painters.filePen
             part.tool == "read" && row.isDirectory -> painters.folder
             part.tool in listOf("glob", "grep") -> painters.search
             part.tool == "question" -> painters.question
