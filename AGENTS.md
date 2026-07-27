@@ -70,6 +70,11 @@ Use legacy V1 protocol API (`/session/*` endpoints). V2 API (`/api/session/*`) i
 - `androidApp/` — Android application
 - `iosApp/` — iOS application (Swift, Xcode project)
 
+## README maintenance
+- When features are added, removed, or behavior changes, update `README.md` to reflect the change.
+- Keep the README end-user focused: describe what the app does, not how it's built. Avoid architecture details, class names, file paths, and implementation trivia.
+- The feature list in README is the user-facing surface — if a new screen, tab, dialog, or interaction appears, it belongs there.
+
 ## Platform compatibility
 - iOS support must be maintained — do not break `iosMain` sources or the `iosApp/` Xcode project
 - iOS UI work is deferred to later in the project lifecycle, but the shared KMP code must remain compilable for iOS

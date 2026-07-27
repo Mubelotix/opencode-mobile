@@ -1,31 +1,32 @@
-This is a Kotlin Multiplatform project targeting Android, iOS.
+# OpencodeApp
 
-* [/iosApp](./iosApp/iosApp) contains an iOS application. Even if you’re sharing your UI with Compose Multiplatform,
-  you need this entry point for your iOS app. This is also where you should add SwiftUI code for your project.
+<div align="center">
 
-* [/shared](./shared/src) is for code that will be shared across your Compose Multiplatform applications.
-  It contains several subfolders:
-  - [commonMain](./shared/src/commonMain/kotlin) is for code that’s common for all targets.
-  - Other folders are for Kotlin code that will be compiled for only the platform indicated in the folder name.
-    For example, if you want to use Apple’s CoreCrypto for the iOS part of your Kotlin app,
-    the [iosMain](./shared/src/iosMain/kotlin) folder would be the right place for such calls.
-    Similarly, if you want to edit the Desktop (JVM) specific part, the [jvmMain](./shared/src/jvmMain/kotlin)
-    folder is the appropriate location.
+**A native mobile client for [OpenCode](https://github.com/anomalyco/opencode), the AI coding agent that runs on your own machine.**
 
-### Running the apps
+Code with your AI pair programmer from your phone or tablet. Keep sessions going while away from your desk. Review diffs, answer questions, switch models and agents; all from your pocket.
 
-Use the run configurations provided by the run widget in your IDE's toolbar. You can also use these commands and options:
-
-- Android app: `./gradlew :androidApp:assembleDebug`
-- iOS app: open the [/iosApp](./iosApp) directory in Xcode and run it from there.
-
-### Running tests
-
-Use the run button in your IDE's editor gutter, or run tests using Gradle tasks:
-
-- Android tests: `./gradlew :shared:testAndroidHostTest`
-- iOS tests: `./gradlew :shared:iosSimulatorArm64Test`
+</div>
 
 ---
 
-Learn more about [Kotlin Multiplatform](https://www.jetbrains.com/help/kotlin-multiplatform-dev/get-started.html)…
+## Features
+
+- **Streaming chat**: real-time conversation with tool calls, diffs, searches, and file reads. Tappable reasoning blocks show the model's thinking with live duration timers
+- **Multi-tab sessions**: open multiple projects and sessions in tabs, switch instantly from the navigation drawer
+- **Git diff review**: interactive file tree, syntax-highlighted changes, inline line comments, send reviews back to the agent
+- **Model & agent switching**: pick the right model and agent (Build, Plan, General, Explore) from the Info tab, with search and connected-only filtering
+- **Interactive terminal**: full PTY terminal in every session
+- **Permission & question prompts**: approve or deny tool permissions, answer questions with radio buttons, checkboxes, or free text
+- **Background notifications**: Android push notifications for agent completions, permission requests, and questions, with deep links back to the session
+- **File explorer**: browse, navigate, and create folders. Pin directories for quick access
+- **Browser tab**: scan for open ports and launch any port in an in-app WebView
+- **WakaTime integration**: track your AI coding sessions
+- **Session forking & reverting**: fork a session from any message, or revert back to a previous point
+- **Command palette**: type `/` in the chat input to see available commands
+
+---
+
+## License
+
+GPLv3
