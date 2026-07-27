@@ -143,7 +143,7 @@ fun StarredScreen(
                                     )
                                     val relativeTime = formatRelativeTime(session.time.updated)
                                     Text(
-                                        text = "$dirName — $relativeTime",
+                                        text = "$dirName, $relativeTime",
                                         style = MaterialTheme.typography.bodySmall,
                                         color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f),
                                         maxLines = 1,
