@@ -28,3 +28,4 @@ val arrowLeftIcon: DrawableResource get() = Res.drawable.arrow_left
 val arrowRightIcon: DrawableResource get() = Res.drawable.arrow_right
 val rotateCwIcon: DrawableResource get() = Res.drawable.rotate_cw
 val listIcon: DrawableResource get() = Res.drawable.list
+val folderPlusIcon: DrawableResource get() = Res.drawable.folder_plus

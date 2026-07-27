@@ -35,14 +35,14 @@ The server listens on `http://0.0.0.0:4096` with HTTP Basic Auth:
 - Username: `opencode`
 - Password: `mysecret`
 
-### 3. Port Scanner (optional)
+### 3. Helper Server (optional)
 
-Run the port scanner on the same machine to enable the Browser tab in the app:
+Run the helper server on the same machine to enable the Browser tab and file system operations (new folder creation, etc.) in the app:
 
 ```bash
-python3 scripts/port_scanner.py
+python3 scripts/helper_server.py
 ```
 
-The scanner listens on port 8765 by default. Override with `PORT_SCANNER_PORT`.
+The server listens on port 8765 by default. Override with `HELPER_SERVER_PORT`.
 
-The scanner returns a JSON list of listening TCP ports on the machine. Configure its endpoint in the app's Settings under "Port Scanner".
+Configure its endpoint in the app's Settings under "Helper Server".

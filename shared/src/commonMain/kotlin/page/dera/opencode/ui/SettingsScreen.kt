@@ -266,7 +266,7 @@ fun SettingsScreen(
             HorizontalDivider()
 
             Text(
-                text = "Port Scanner",
+                text = "Helper Server",
                 style = MaterialTheme.typography.titleMedium,
             )
 
@@ -277,7 +277,7 @@ fun SettingsScreen(
             OutlinedTextField(
                 value = portScannerEndpoint,
                 onValueChange = { portScannerEndpoint = it; portScannerSaved = false },
-                label = { Text("Scanner Endpoint") },
+                label = { Text("Helper Server Endpoint") },
                 placeholder = { Text("192.168.1.54:8765") },
                 singleLine = true,
                 modifier = Modifier.fillMaxWidth(),

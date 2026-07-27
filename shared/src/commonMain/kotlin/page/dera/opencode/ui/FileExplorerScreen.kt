@@ -15,11 +15,15 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.FloatingActionButton
+import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
+import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
@@ -30,11 +34,15 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.ColorFilter
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import io.ktor.client.HttpClient
+import kotlinx.coroutines.launch
 import opencodeapp.shared.generated.resources.Res
 import opencodeapp.shared.generated.resources.folder
 import opencodeapp.shared.generated.resources.file
@@ -42,7 +50,9 @@ import opencodeapp.shared.generated.resources.menuIcon
 import org.jetbrains.compose.resources.painterResource
 import page.dera.opencode.api.FsEntry
 import page.dera.opencode.api.OpencodeApi
+import page.dera.opencode.api.PortScannerApi
 import page.dera.opencode.settings.AppSettings
+import opencodeapp.shared.generated.resources.folderPlusIcon
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -61,6 +71,23 @@ fun FileExplorerScreen(
     var showPathInput by remember { mutableStateOf(false) }
     val pathStack = remember { mutableListOf(initialDirectory) }
     var stackPos by remember { mutableStateOf(0) }
+    var showNewFolderDialog by remember { mutableStateOf(false) }
+    var newFolderName by remember { mutableStateOf("") }
+    var isCreatingFolder by remember { mutableStateOf(false) }
+    var folderCreationError by remember { mutableStateOf<String?>(null) }
+    var reloadCounter by remember { mutableStateOf(0) }
+    val scope = rememberCoroutineScope()
+    val httpClient = remember { HttpClient() }
+    val helperEndpoint = remember(settings.portScannerEndpoint) { settings.portScannerEndpoint }
+    val helperApi = remember(helperEndpoint) {
+        if (helperEndpoint != null) PortScannerApi(httpClient, helperEndpoint.trimEnd('/'), settings.serverPassword) else null
+    }
+
+    fun refreshDirectory() {
+        isLoading = true
+        errorMessage = null
+        entries = null
+    }
 
     fun navigateTo(path: String) {
         while (pathStack.size > stackPos + 1) pathStack.removeLast()
@@ -98,7 +125,7 @@ fun FileExplorerScreen(
         goBack()
     }
 
-    LaunchedEffect(currentPath) {
+    LaunchedEffect(currentPath, reloadCounter) {
         if (currentPath.isBlank()) return@LaunchedEffect
         val result = api.listFiles(directory = currentPath)
         result.fold(
@@ -143,6 +170,23 @@ fun FileExplorerScreen(
                     }
                 },
             )
+        },
+        floatingActionButton = {
+            if (helperApi != null && !isLoading && entries != null) {
+                FloatingActionButton(
+                    onClick = {
+                        newFolderName = ""
+                        showNewFolderDialog = true
+                    },
+                ) {
+                    Image(
+                        painter = painterResource(folderPlusIcon),
+                        contentDescription = "New folder",
+                        modifier = Modifier.size(24.dp),
+                        colorFilter = ColorFilter.tint(MaterialTheme.colorScheme.onPrimaryContainer),
+                    )
+                }
+            }
         },
     ) { padding ->
         Box(modifier = Modifier.fillMaxSize().padding(padding)) {
@@ -232,5 +276,71 @@ fun FileExplorerScreen(
                 }
             }
         }
+    }
+
+    if (showNewFolderDialog) {
+        AlertDialog(
+            onDismissRequest = {
+                if (!isCreatingFolder) showNewFolderDialog = false
+            },
+            title = { Text("New Folder") },
+            text = {
+                Column {
+                    OutlinedTextField(
+                        value = newFolderName,
+                        onValueChange = {
+                            newFolderName = it
+                            folderCreationError = null
+                        },
+                        label = { Text("Folder name") },
+                        singleLine = true,
+                        modifier = Modifier.fillMaxWidth(),
+                        enabled = !isCreatingFolder,
+                    )
+                    if (folderCreationError != null) {
+                        Spacer(Modifier.height(8.dp))
+                        Text(
+                            folderCreationError!!,
+                            color = MaterialTheme.colorScheme.error,
+                            style = MaterialTheme.typography.bodySmall,
+                        )
+                    }
+                }
+            },
+            confirmButton = {
+                TextButton(
+                    onClick = {
+                        val name = newFolderName.trim()
+                        if (name.isNotEmpty() && !name.contains("/")) {
+                            isCreatingFolder = true
+                            folderCreationError = null
+                            scope.launch {
+                                val result = helperApi?.createDirectory("$currentPath/$name")
+                                if (result?.isSuccess == true) {
+                                    showNewFolderDialog = false
+                                    isLoading = true
+                                    entries = null
+                                    reloadCounter++
+                                } else {
+                                    folderCreationError = result?.exceptionOrNull()?.message ?: "Failed to create folder"
+                                }
+                                isCreatingFolder = false
+                            }
+                        }
+                    },
+                    enabled = newFolderName.isNotBlank() && !isCreatingFolder,
+                ) {
+                    Text(if (isCreatingFolder) "Creating..." else "Create")
+                }
+            },
+            dismissButton = {
+                TextButton(
+                    onClick = { showNewFolderDialog = false },
+                    enabled = !isCreatingFolder,
+                ) {
+                    Text("Cancel")
+                }
+            },
+        )
     }
 }
