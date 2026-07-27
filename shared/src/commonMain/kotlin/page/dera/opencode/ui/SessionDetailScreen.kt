@@ -113,6 +113,8 @@ import page.dera.opencode.api.SessionModel
 import page.dera.opencode.api.SessionTokens
 import page.dera.opencode.api.SessionInfo
 import page.dera.opencode.api.TodoInfo
+import page.dera.opencode.util.rememberIsAppFocused
+import page.dera.opencode.util.showSessionIdleNotification
 import page.dera.opencode.ui.TerminalContent
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonElement
@@ -329,6 +331,7 @@ fun SessionDetailScreen(api: OpencodeApi, sessionId: String, sessionTitle: Strin
     var isLoading by remember { mutableStateOf(true) }
     var isSending by remember { mutableStateOf(false) }
     var isRunning by remember { mutableStateOf(false) }
+    val isFocused = rememberIsAppFocused()
     var errorText by remember { mutableStateOf<String?>(null) }
     var sessionTokens by remember { mutableStateOf<SessionTokens?>(null) }
     var sessionCost by remember { mutableStateOf<Double?>(null) }
@@ -499,6 +502,9 @@ fun SessionDetailScreen(api: OpencodeApi, sessionId: String, sessionTitle: Strin
                             println("OC_DBG: session.idle $sid, msgs before=${messages.size}")
                             isRunning = false
                             fileChangeTick++
+                            if (!isFocused.value) {
+                                showSessionIdleNotification(currentTitle, sessionId, directory)
+                            }
                             api.getSessionMessages(sessionId).onSuccess { fresh ->
                                 Perf.timed("session.idle refresh msgs=${fresh.size}") {
                                     messages.removeAll { !it.info.id.startsWith("evt_") }

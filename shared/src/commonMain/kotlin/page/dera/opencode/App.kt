@@ -69,7 +69,7 @@ private sealed class Screen {
 }
 
 @Composable
-fun App() {
+fun App(sessionToOpenId: String? = null, sessionToOpenDirectory: String? = null) {
     val settings = remember { AppSettings() }
     val serverUrl = remember { OpencodeApi.normalizeUrl(settings.serverUrl ?: "") }
     val password = remember { settings.serverPassword }
@@ -125,6 +125,15 @@ fun App() {
         val id = "tab_${tabCounter++}"
         tabs = tabs + Tab(id = id, screen = TabScreen.SessionDetail(api, session.location.directory, name, session))
         activeTabId = id
+    }
+
+    LaunchedEffect(sessionToOpenId, sessionToOpenDirectory) {
+        val id = sessionToOpenId ?: return@LaunchedEffect
+        val dir = sessionToOpenDirectory ?: return@LaunchedEffect
+        val result = api.getSession(id, dir)
+        result.onSuccess { session ->
+            openSession(api, session)
+        }
     }
 
     MaterialTheme {
