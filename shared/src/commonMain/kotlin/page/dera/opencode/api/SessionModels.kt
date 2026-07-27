@@ -28,6 +28,14 @@ data class SessionInfo(
     val slug: String? = null,
     val tokens: SessionTokens? = null,
     val cost: Double? = null,
+    val revert: SessionRevert? = null,
+)
+
+@Serializable
+data class SessionRevert(
+    val messageID: String,
+    val partID: String? = null,
+    val snapshot: String? = null,
 )
 
 @Serializable

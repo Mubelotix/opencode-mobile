@@ -45,6 +45,8 @@ import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Checkbox
 import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -78,6 +80,8 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.ColorFilter
 import androidx.compose.ui.graphics.painter.Painter
+import androidx.compose.ui.platform.LocalClipboardManager
+import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.style.TextOverflow
@@ -170,7 +174,7 @@ private sealed interface ChatRow {
     val key: String
     val contentType: String
 }
-private data class UserTextRow(override val key: String, val text: String) : ChatRow {
+private data class UserTextRow(override val key: String, val text: String, val messageID: String) : ChatRow {
     override val contentType get() = "user"
 }
 private data class SystemTextRow(override val key: String, val text: String) : ChatRow {
@@ -280,7 +284,7 @@ private fun buildRows(messages: List<LegacyWithParts>, showIndicator: Boolean, p
                     parts.isEmpty() -> "Sending..."
                     else -> "Sent a message"
                 }
-                rows.add(UserTextRow("u:${msg.info.id}", label))
+                rows.add(UserTextRow("u:${msg.info.id}", label, msg.info.id))
                 if (parts.any { it.type == "compaction" }) {
                     rows.add(CompactionRow("compaction:${msg.info.id}"))
                 }
@@ -357,6 +361,8 @@ fun SessionDetailScreen(api: OpencodeApi, sessionId: String, sessionTitle: Strin
     var selectedTab by remember { mutableStateOf(0) }
     var todos by remember { mutableStateOf<List<TodoInfo>>(emptyList()) }
     val scope = rememberCoroutineScope()
+    var userMessageMenuTarget by remember { mutableStateOf<UserTextRow?>(null) }
+    var showRevertDialog by remember { mutableStateOf<UserTextRow?>(null) }
 
     LaunchedEffect(sessionId) {
         isLoading = true
@@ -584,6 +590,11 @@ fun SessionDetailScreen(api: OpencodeApi, sessionId: String, sessionTitle: Strin
                                 ))
                             }
                         }
+                        "message.removed" -> {
+                            val mid = props["messageID"]?.jsonPrimitive?.content ?: return@collect
+                            println("OC_DBG: message.removed messageID=$mid")
+                            messages.removeAll { it.info.id == mid }
+                        }
                         else -> {
                             val rawId = "evt_${event.payload?.type ?: "unknown"}_${kotlin.random.Random.nextLong().toString(36)}"
                             val display = event.payload?.properties?.toString() ?: "{}"
@@ -738,7 +749,14 @@ fun SessionDetailScreen(api: OpencodeApi, sessionId: String, sessionTitle: Strin
                             items(rows, key = { it.key }, contentType = { it.contentType }) { row ->
                                 Box(Modifier.timedMeasure(row.key, thresholdMs = 4.0)) {
                                     val t0 = Perf.clock.markNow()
-                                    ChatRowContent(row, streamingText, chatPainters, onInterrupt = if (row is IndicatorRow) {{ scope.launch { api.interruptSession(sessionId) } }} else null)
+                                    ChatRowContent(row, streamingText, chatPainters, onInterrupt = if (row is IndicatorRow) {{ scope.launch { api.interruptSession(sessionId) } }} else null, onRevertRequest = { r -> showRevertDialog = r }, onForkRequest = { r ->
+                                        scope.launch {
+                                            api.forkSession(sessionId, directory, r.messageID).fold(
+                                                onSuccess = { onForkSession?.invoke(it) },
+                                                onFailure = { errorText = "Fork failed: ${it.message}" },
+                                            )
+                                        }
+                                    })
                                     val elapsed = Perf.ms(t0)
                                     if (elapsed >= 2.0) println("OC_PERF: compose row=${row.key} type=${row.contentType} took=${elapsed}ms")
                                 }
@@ -932,6 +950,34 @@ fun SessionDetailScreen(api: OpencodeApi, sessionId: String, sessionTitle: Strin
                             .clickable(enabled = inputText.isNotBlank() && !isSending) { doSend() }
                     )
                 }
+            }
+            if (showRevertDialog != null) {
+                val revertRow = showRevertDialog!!
+                AlertDialog(
+                    onDismissRequest = { showRevertDialog = null },
+                    title = { Text("Revert messages") },
+                    text = { Text("Revert this message and all messages after it? File changes will be rolled back.") },
+                    confirmButton = {
+                        TextButton(
+                            onClick = {
+                                scope.launch {
+                                    val mid = revertRow.messageID
+                                    api.revertStage(sessionId, mid, directory)
+                                        .onSuccess { messages.removeAll { it.info.id >= mid } }
+                                        .onFailure { errorText = "Revert failed: ${it.message}" }
+                                }
+                                showRevertDialog = null
+                            },
+                        ) {
+                            Text("Revert", color = MaterialTheme.colorScheme.error)
+                        }
+                    },
+                    dismissButton = {
+                        TextButton(onClick = { showRevertDialog = null }) {
+                            Text("Cancel")
+                        }
+                    },
+                )
             }
             if (selectedTab == 2) {
                 TodoContent(todos)
@@ -1277,26 +1323,59 @@ private fun QuestionPrompt(req: QuestionRequest, api: OpencodeApi, sessionId: St
 }
 
 @Composable
-private fun ChatRowContent(row: ChatRow, streamingText: StreamingTexts, painters: ChatPainters, onInterrupt: (() -> Unit)? = null) {
+private fun ChatRowContent(row: ChatRow, streamingText: StreamingTexts, painters: ChatPainters, onInterrupt: (() -> Unit)? = null, onRevertRequest: ((UserTextRow) -> Unit)? = null, onForkRequest: ((UserTextRow) -> Unit)? = null) {
+    val clipboardManager = LocalClipboardManager.current
     when (row) {
-        is UserTextRow -> Row(
-            Modifier.fillMaxWidth().padding(top = 8.dp, bottom = 2.dp),
-            horizontalArrangement = Arrangement.End,
-        ) {
-            Column(
-                Modifier
-                    .widthIn(max = 320.dp)
-                    .clip(RoundedCornerShape(16.dp, 4.dp, 16.dp, 16.dp))
-                    .background(MaterialTheme.colorScheme.primaryContainer)
-                    .padding(12.dp),
+        is UserTextRow -> {
+            var menuExpanded by remember { mutableStateOf(false) }
+            Row(
+                Modifier.fillMaxWidth().padding(top = 8.dp, bottom = 2.dp),
+                horizontalArrangement = Arrangement.End,
             ) {
-                SelectionContainer {
-                    Text(
-                        row.text,
-                        style = MaterialTheme.typography.bodyMedium,
-                        color = MaterialTheme.colorScheme.onPrimaryContainer,
+                Box {
+                    Column(
+                        Modifier
+                            .widthIn(max = 320.dp)
+                            .clip(RoundedCornerShape(16.dp, 4.dp, 16.dp, 16.dp))
+                            .background(MaterialTheme.colorScheme.primaryContainer)
+                            .padding(12.dp),
+                    ) {
+                        SelectionContainer {
+                            Text(
+                                row.text,
+                                style = MaterialTheme.typography.bodyMedium,
+                                color = MaterialTheme.colorScheme.onPrimaryContainer,
+                                modifier = Modifier.clickable { menuExpanded = true },
+                            )
+                        }
+                    }
+                    DropdownMenu(
+                        expanded = menuExpanded,
+                        onDismissRequest = { menuExpanded = false },
+                    ) {
+                    DropdownMenuItem(
+                        text = { Text("Copy text") },
+                        onClick = {
+                            menuExpanded = false
+                            clipboardManager.setText(AnnotatedString(row.text))
+                        },
+                    )
+                    DropdownMenuItem(
+                        text = { Text("Revert") },
+                        onClick = {
+                            menuExpanded = false
+                            onRevertRequest?.invoke(row)
+                        },
+                    )
+                    DropdownMenuItem(
+                        text = { Text("Fork from here") },
+                        onClick = {
+                            menuExpanded = false
+                            onForkRequest?.invoke(row)
+                        },
                     )
                 }
+            }
             }
         }
         is AssistantErrorRow -> {

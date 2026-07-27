@@ -407,6 +407,20 @@ class OpencodeApi(
         }
     }
 
+    suspend fun revertStage(sessionID: String, messageID: String, directory: String): Result<Unit> {
+        return try {
+            val p = RevertStagePayload(messageID = messageID)
+            val resp = client.post("$serverUrl/session/$sessionID/revert") {
+                authHeader()?.let { (k, v) -> header(k, v) }
+                contentType(ContentType.Application.Json)
+                url.parameters.append("directory", directory)
+                setBody(json.encodeToString(RevertStagePayload.serializer(), p))
+            }
+            if (resp.status.isSuccess()) Result.success(Unit)
+            else Result.failure(Exception("HTTP ${resp.status.value}: ${resp.bodyAsText()}"))
+        } catch (e: Exception) { Result.failure(e) }
+    }
+
     companion object {
         fun normalizeUrl(raw: String): String = raw.trim().let { if (it.contains("://")) it.trimEnd('/') else "http://${it.trimEnd('/')}" }
     }
@@ -439,3 +453,8 @@ data class SessionUpdatePayload(val title: String)
 
 @Serializable
 data class ForkPayload(val messageID: String)
+
+@Serializable
+data class RevertStagePayload(
+    val messageID: String,
+)
