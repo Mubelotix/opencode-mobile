@@ -114,7 +114,7 @@ import page.dera.opencode.api.SessionTokens
 import page.dera.opencode.api.SessionInfo
 import page.dera.opencode.api.TodoInfo
 import page.dera.opencode.util.rememberIsAppFocused
-import page.dera.opencode.util.showSessionIdleNotification
+import page.dera.opencode.util.showBackgroundNotification
 import page.dera.opencode.ui.TerminalContent
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonElement
@@ -503,7 +503,7 @@ fun SessionDetailScreen(api: OpencodeApi, sessionId: String, sessionTitle: Strin
                             isRunning = false
                             fileChangeTick++
                             if (!isFocused.value) {
-                                showSessionIdleNotification(currentTitle, sessionId, directory)
+                                showBackgroundNotification(currentTitle, "Agent finished", sessionId, directory)
                             }
                             api.getSessionMessages(sessionId).onSuccess { fresh ->
                                 Perf.timed("session.idle refresh msgs=${fresh.size}") {
@@ -565,6 +565,10 @@ fun SessionDetailScreen(api: OpencodeApi, sessionId: String, sessionTitle: Strin
                                 )
                             } ?: PermissionRequest(id = id, sessionID = sid, permission = permission, patterns = patterns, always = always)
                             if (permissionRequests.none { it.id == id }) permissionRequests.add(tool)
+                            if (!isFocused.value) {
+                                val permBody = patterns.joinToString(", ") { it.removePrefix("**").removeSuffix("**") }.ifEmpty { permission }
+                                showBackgroundNotification(currentTitle, "Needs permission: $permBody", sessionId, directory)
+                            }
                         }
                         "permission.replied" -> {
                             val rid = props["requestID"]?.jsonPrimitive?.content ?: return@collect
@@ -600,6 +604,10 @@ fun SessionDetailScreen(api: OpencodeApi, sessionId: String, sessionTitle: Strin
                             }
                             val req = QuestionRequest(id = id, sessionID = sid, questions = qlist, tool = tool)
                             if (questionRequests.none { it.id == id }) questionRequests.add(req)
+                            if (!isFocused.value) {
+                                val qBody = props["questions"]?.jsonArray?.firstOrNull()?.jsonObject?.get("question")?.jsonPrimitive?.content ?: "Waiting for your response"
+                                showBackgroundNotification(currentTitle, qBody, sessionId, directory)
+                            }
                         }
                         "question.replied" -> {
                             val rid = props["requestID"]?.jsonPrimitive?.content ?: return@collect
@@ -659,6 +667,17 @@ fun SessionDetailScreen(api: OpencodeApi, sessionId: String, sessionTitle: Strin
                 }
             }
         } catch (_: Exception) { }
+    }
+
+    LaunchedEffect(isFocused.value) {
+        if (isFocused.value && isRunning) {
+            api.getSessionMessages(sessionId).onSuccess { fresh ->
+                messages.removeAll { !it.info.id.startsWith("evt_") }
+                fresh.forEach { f -> if (messages.none { m -> m.info.id == f.info.id }) messages.add(f) }
+            }
+            isRunning = false
+            fileChangeTick++
+        }
     }
 
     val imeBottomDp = rememberImeBottomDp().dp

@@ -1,3 +1,3 @@
 package page.dera.opencode.util
 
-expect fun showSessionIdleNotification(sessionTitle: String, sessionId: String, directory: String)
+expect fun showBackgroundNotification(title: String, body: String, sessionId: String, directory: String)

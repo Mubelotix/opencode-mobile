@@ -12,20 +12,27 @@ object AppContextHolder {
     var applicationContext: Context? = null
 }
 
-actual fun showSessionIdleNotification(sessionTitle: String, sessionId: String, directory: String) {
-    val context = AppContextHolder.applicationContext ?: return
-    val channelId = "opencode_agent"
+private var channelCreated = false
 
-    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+actual fun showBackgroundNotification(title: String, body: String, sessionId: String, directory: String) {
+    val context = AppContextHolder.applicationContext ?: return
+    val channelId = "opencode_agent_alerts"
+
+    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O && !channelCreated) {
+        val manager = context.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
+        manager.deleteNotificationChannel(channelId)
         val channel = NotificationChannel(
             channelId,
             "Agent",
-            NotificationManager.IMPORTANCE_DEFAULT
+            NotificationManager.IMPORTANCE_HIGH
         ).apply {
             description = "Notifications when the agent finishes"
+            enableLights(true)
+            enableVibration(true)
+            setShowBadge(true)
         }
-        val manager = context.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
         manager.createNotificationChannel(channel)
+        channelCreated = true
     }
 
     val intent = context.packageManager.getLaunchIntentForPackage(context.packageName)?.apply {
@@ -37,29 +44,32 @@ actual fun showSessionIdleNotification(sessionTitle: String, sessionId: String, 
         context, 0, intent, PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
     )
 
-    val title = sessionTitle.ifBlank { "OpenCode" }
+    val title = title.ifBlank { "OpenCode" }
     val notification = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
         android.app.Notification.Builder(context, channelId)
             .setSmallIcon(android.R.drawable.ic_dialog_info)
             .setContentTitle(title)
-            .setContentText("Agent finished")
+            .setContentText(body)
             .setAutoCancel(true)
             .setContentIntent(pendingIntent)
+            .setDefaults(android.app.Notification.DEFAULT_ALL)
             .build()
     } else {
         @Suppress("DEPRECATION")
         android.app.Notification.Builder(context)
             .setSmallIcon(android.R.drawable.ic_dialog_info)
             .setContentTitle(title)
-            .setContentText("Agent finished")
+            .setContentText(body)
             .setAutoCancel(true)
             .setContentIntent(pendingIntent)
+            .setDefaults(android.app.Notification.DEFAULT_ALL)
+            .setPriority(android.app.Notification.PRIORITY_HIGH)
             .build()
     }
 
     try {
         val manager = context.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
-        manager.notify(sessionTitle.hashCode(), notification)
+        manager.notify(sessionId.hashCode(), notification)
     } catch (e: SecurityException) {
         // Notification permission not granted
     }

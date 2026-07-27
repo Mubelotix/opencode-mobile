@@ -1,4 +1,4 @@
 package page.dera.opencode.util
 
-actual fun showSessionIdleNotification(sessionTitle: String, sessionId: String, directory: String) {
+actual fun showBackgroundNotification(title: String, body: String, sessionId: String, directory: String) {
 }
