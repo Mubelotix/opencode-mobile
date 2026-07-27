@@ -178,7 +178,7 @@ fun FileExplorerScreen(
                                     Row(
                                         modifier = Modifier
                                             .fillMaxWidth()
-                                            .clickable { goBack() }
+                                            .clickable { loadDirectory(parentPath!!) }
                                             .padding(horizontal = 16.dp, vertical = 4.dp),
                                     ) {
                                         Text("..", color = MaterialTheme.colorScheme.primary)
