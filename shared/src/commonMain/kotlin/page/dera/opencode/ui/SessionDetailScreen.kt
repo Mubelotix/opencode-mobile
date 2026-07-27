@@ -105,6 +105,7 @@ import page.dera.opencode.api.QuestionToolRef
 import page.dera.opencode.api.ProviderInfo
 import page.dera.opencode.api.SessionModel
 import page.dera.opencode.api.SessionTokens
+import page.dera.opencode.api.SessionInfo
 import page.dera.opencode.api.TodoInfo
 import page.dera.opencode.ui.TerminalContent
 import kotlinx.serialization.json.Json
@@ -312,7 +313,7 @@ private fun buildRows(messages: List<LegacyWithParts>, showIndicator: Boolean, p
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun SessionDetailScreen(api: OpencodeApi, sessionId: String, sessionTitle: String, directory: String, projectRoot: String, onBack: () -> Unit, onMenuClick: (() -> Unit)? = null, onTitleChange: ((String) -> Unit)? = null, onDeleteSession: (() -> Unit)? = null, settings: page.dera.opencode.settings.AppSettings = remember { page.dera.opencode.settings.AppSettings() }) {
+fun SessionDetailScreen(api: OpencodeApi, sessionId: String, sessionTitle: String, directory: String, projectRoot: String, onBack: () -> Unit, onMenuClick: (() -> Unit)? = null, onTitleChange: ((String) -> Unit)? = null, onDeleteSession: (() -> Unit)? = null, onForkSession: ((SessionInfo) -> Unit)? = null, settings: page.dera.opencode.settings.AppSettings = remember { page.dera.opencode.settings.AppSettings() }) {
     val messages = remember { mutableStateListOf<LegacyWithParts>() }
     @OptIn(ExperimentalFoundationApi::class)
     val listState = rememberLazyListState(prefetchStrategy = remember { DeepPrefetchStrategy(depth = 8) })
@@ -777,6 +778,27 @@ fun SessionDetailScreen(api: OpencodeApi, sessionId: String, sessionTitle: Strin
                                         isSending = false
                                     }
                                 }
+                            } else if (commandName == "fork") {
+                                inputText = ""
+                                if (onForkSession == null) {
+                                    errorText = "Fork is not available"
+                                } else {
+                                    isSending = true
+                                    errorText = null
+                                    scope.launch {
+                                        api.forkSession(sessionId, directory).fold(
+                                            onSuccess = { forkedSession ->
+                                                isSending = false
+                                                onForkSession(forkedSession)
+                                            },
+                                            onFailure = { e ->
+                                                println("OC_DBG: fork fail ${e.message}")
+                                                errorText = e.message ?: "Failed to fork"
+                                                isSending = false
+                                            },
+                                        )
+                                    }
+                                }
                             } else {
                                 val cmd = commands.find { it.name == commandName }
                                 if (cmd == null) {
@@ -839,13 +861,20 @@ fun SessionDetailScreen(api: OpencodeApi, sessionId: String, sessionTitle: Strin
                 val showCommands = inputText.startsWith("/") && !inputText.contains(" ")
                 val commandFilterText = if (showCommands && inputText.length > 1) inputText.removePrefix("/").lowercase() else ""
                 val compactVirtualCmd = CommandInfo(name = "compact", template = "/compact", description = "Compact session context")
+                val forkVirtualCmd = CommandInfo(name = "fork", template = "/fork", description = "Fork a new session from this point")
                 val filteredCommands = remember(inputText, commands) {
                     if (!showCommands) emptyList()
                     else {
                         val matches = commands.filter { it.name.lowercase().contains(commandFilterText) }
-                        val includeCompact = commandFilterText.isEmpty() || "compact".contains(commandFilterText)
-                        if (includeCompact) listOf(compactVirtualCmd) + matches
-                        else matches
+                        val virtualCmds = buildList {
+                            if (commandFilterText.isEmpty() || "compact".contains(commandFilterText)) {
+                                add(compactVirtualCmd)
+                            }
+                            if (commandFilterText.isEmpty() || "fork".contains(commandFilterText)) {
+                                add(forkVirtualCmd)
+                            }
+                        }
+                        virtualCmds + matches
                     }
                 }
                 if (filteredCommands.isNotEmpty()) {

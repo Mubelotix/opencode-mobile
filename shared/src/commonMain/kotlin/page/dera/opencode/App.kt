@@ -413,6 +413,9 @@ private fun TabContent(
                     onUpdateTab(tab.copy(screen = TabScreen.SessionDetail(ts.api, ts.directory, ts.projectName, ts.session.copy(title = newTitle))))
                 },
                 onDeleteSession = onDeleteSession,
+                onForkSession = { forkedSession ->
+                    onOpenSession(ts.api, forkedSession)
+                },
             )
         }
     }

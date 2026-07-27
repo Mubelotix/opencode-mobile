@@ -118,6 +118,35 @@ data class SessionCreateResponse(
 )
 
 @Serializable
+data class V2Session(
+    val id: String,
+    val title: String,
+    val projectID: String,
+    val directory: String,
+    @SerialName("workspaceID")
+    val workspaceID: String? = null,
+    val parentID: String? = null,
+    val agent: String? = null,
+    val model: SessionModel? = null,
+    val time: SessionTime,
+    val cost: Double? = null,
+    val tokens: SessionTokens? = null,
+)
+
+fun V2Session.toSessionInfo(): SessionInfo = SessionInfo(
+    id = id,
+    title = title,
+    projectID = projectID,
+    time = time,
+    location = SessionLocation(directory = directory, workspaceID = workspaceID),
+    model = model,
+    parentID = parentID,
+    agent = agent,
+    cost = cost,
+    tokens = tokens,
+)
+
+@Serializable
 data class PromptPayload(
     val prompt: PromptBody,
     val delivery: String? = null,

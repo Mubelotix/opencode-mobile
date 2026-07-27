@@ -251,6 +251,27 @@ class OpencodeApi(
         } catch (e: Exception) { Result.failure(e) }
     }
 
+    suspend fun forkSession(sessionId: String, directory: String, messageID: String? = null): Result<SessionInfo> {
+        return try {
+            val payload = if (messageID != null) {
+                ForkPayload(messageID = messageID)
+            } else {
+                null
+            }
+            val body = if (payload != null) json.encodeToString(ForkPayload.serializer(), payload) else ""
+            val req = client.post("$serverUrl/session/$sessionId/fork") {
+                authHeader()?.let { (k, v) -> header(k, v) }
+                url.parameters.append("directory", directory)
+                if (payload != null) {
+                    contentType(ContentType.Application.Json)
+                    setBody(body)
+                }
+            }
+            val responseText = req.bodyAsText()
+            Result.success(json.decodeFromString<V2Session>(responseText).toSessionInfo())
+        } catch (e: Exception) { Result.failure(e) }
+    }
+
     suspend fun deleteSession(sessionId: String, directory: String): Result<Unit> {
         return try {
             val resp = client.delete("$serverUrl/session/$sessionId") {
@@ -415,3 +436,6 @@ data class PermissionReplyPayload(val reply: String, val message: String? = null
 
 @Serializable
 data class SessionUpdatePayload(val title: String)
+
+@Serializable
+data class ForkPayload(val messageID: String)
