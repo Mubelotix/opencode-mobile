@@ -333,6 +333,7 @@ fun SessionDetailScreen(api: OpencodeApi, sessionId: String, sessionTitle: Strin
     var sessionCost by remember { mutableStateOf<Double?>(null) }
     var sessionModel by remember { mutableStateOf<SessionModel?>(null) }
     var providers by remember { mutableStateOf<List<ProviderInfo>>(emptyList()) }
+    var connectedProviders by remember { mutableStateOf<Set<String>>(emptySet()) }
     var commands by remember { mutableStateOf<List<CommandInfo>>(emptyList()) }
     var currentTitle by remember { mutableStateOf(sessionTitle) }
     var isEditingTitle by remember { mutableStateOf(false) }
@@ -390,7 +391,10 @@ fun SessionDetailScreen(api: OpencodeApi, sessionId: String, sessionTitle: Strin
             }
             currentTitle = info.title.ifEmpty { currentTitle }
         }
-        api.listProviders(directory).onSuccess { providers = it }
+        api.listProvidersFull(directory).onSuccess {
+            providers = it.all
+            connectedProviders = it.connected.toSet()
+        }
         api.listCommands(directory).onSuccess { commands = it }
     }
 
@@ -1013,7 +1017,7 @@ fun SessionDetailScreen(api: OpencodeApi, sessionId: String, sessionTitle: Strin
                     TerminalContent(api, directory)
                 }
             } else if (selectedTab == 4) {
-                InfoContent(sessionTokens, sessionCost, sessionModel, providers, messages, sessionId, api, directory, onDeleteSession, onModelChange = { sessionModel = it })
+                InfoContent(sessionTokens, sessionCost, sessionModel, providers, connectedProviders, messages, sessionId, api, directory, onDeleteSession, onModelChange = { sessionModel = it })
             } else if (selectedTab != 0 && selectedTab != 1 && selectedTab != 5) {
                 Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
                     Text(
@@ -2008,6 +2012,7 @@ private fun InfoContent(
     sessionCost: Double?,
     sessionModel: SessionModel?,
     providers: List<ProviderInfo>,
+    connectedProviders: Set<String> = emptySet(),
     messages: List<LegacyWithParts>,
     sessionId: String,
     api: OpencodeApi,
@@ -2231,10 +2236,12 @@ private fun InfoContent(
 
         if (showModelDialog) {
             var searchQuery by remember { mutableStateOf("") }
-            val pickerItems = remember(providers, searchQuery) {
+            var connectedOnly by remember { mutableStateOf(true) }
+            val pickerItems = remember(providers, connectedProviders, connectedOnly, searchQuery) {
                 val result = mutableListOf<ModelPickerItem>()
                 val query = searchQuery.trim().lowercase()
                 for (provider in providers) {
+                    if (connectedOnly && connectedProviders.isNotEmpty() && provider.id !in connectedProviders) continue
                     val matchingModels = provider.models.values.filter { m ->
                         query.isEmpty() ||
                         m.name.lowercase().contains(query) ||
@@ -2280,8 +2287,28 @@ private fun InfoContent(
                                 }
                             },
                             singleLine = true,
-                            modifier = Modifier.fillMaxWidth().padding(bottom = 8.dp),
+                            modifier = Modifier.fillMaxWidth().padding(bottom = 4.dp),
                         )
+
+                        if (connectedProviders.isNotEmpty()) {
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                                modifier = Modifier.fillMaxWidth().clickable { connectedOnly = !connectedOnly }.padding(vertical = 4.dp),
+                            ) {
+                                Checkbox(
+                                    checked = connectedOnly,
+                                    onCheckedChange = { connectedOnly = it },
+                                    modifier = Modifier.size(20.dp),
+                                )
+                                Spacer(Modifier.width(8.dp))
+                                Text(
+                                    "Connected providers only",
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = MaterialTheme.colorScheme.onSurface,
+                                )
+                            }
+                            Spacer(Modifier.height(4.dp))
+                        }
 
                         if (providers.isEmpty()) {
                             Box(

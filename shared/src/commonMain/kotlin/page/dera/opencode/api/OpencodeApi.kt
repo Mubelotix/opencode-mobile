@@ -100,6 +100,18 @@ class OpencodeApi(
         }
     }
 
+    suspend fun listProvidersFull(directory: String): Result<ProviderListResponse> {
+        return try {
+            val b = client.get("$serverUrl/provider") {
+                authHeader()?.let { (k, v) -> header(k, v) }
+                url.parameters.append("directory", directory)
+            }.bodyAsText()
+            Result.success(json.decodeFromString<ProviderListResponse>(b))
+        } catch (e: Exception) {
+            Result.failure(e)
+        }
+    }
+
     suspend fun listFiles(directory: String, path: String = "."): Result<FsListResponse> {
         return try {
             val b = client.get("$serverUrl/api/fs/list") {
