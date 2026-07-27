@@ -1,0 +1,8 @@
+.gradle/
+.kotlin/
+build/
+androidApp/build/
+iosApp/
+node_modules/
+.tmp/
+opencode-server-data/
