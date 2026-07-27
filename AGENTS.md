@@ -52,7 +52,7 @@ When implementing ANYTHING related to the opencode server — API endpoints, env
 Failure: revert, grep source, redo.
 
 ### API version
-Use V2 protocol API exclusively (`/api/session/*` endpoints). Never use legacy `/session/*` endpoints. The V2 API uses `SessionMessage` format with `type` discriminator field. Legacy V1 format (`{ info, parts }`) is not supported.
+Use legacy V1 protocol API (`/session/*` endpoints). V2 API (`/api/session/*`) is not yet ready. The legacy V1 format uses `{ info, parts }`. V2 `SessionMessage` format is not supported.
 
 ## Dependencies
 - Prefer latest stable versions when adding or updating dependencies
