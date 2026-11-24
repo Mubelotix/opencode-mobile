@@ -1,3 +1,6 @@
+> [!IMPORTANT]
+> OpenCode Mobile is discontinued. I switched to [T3 Code](https://github.com/pingdotgg/t3code) instead.
+
 # OpenCode Mobile
 
 <div align="center">
